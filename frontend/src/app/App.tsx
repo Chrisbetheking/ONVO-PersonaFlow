@@ -25,7 +25,7 @@ function RoutedApp() {
   switch (route.id) {
     case 'studio': page = <StudioPage params={route.params} />; break
     case 'followup': page = <FollowUpPage params={route.params} />; break
-    case 'review': page = <ReviewPage />; break
+    case 'review': page = <ReviewPage params={route.params} />; break
     case 'campaigns': page = <CampaignPage />; break
     case 'advisors': page = <AdvisorsPage />; break
     case 'settings': page = <SettingsPage />; break

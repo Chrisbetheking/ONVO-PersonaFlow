@@ -16,8 +16,15 @@ export const fallbackBootstrap: BootstrapResponse = {
     campaign_brief: '围绕二孩家庭满员乘坐、儿童用品收纳和周末出行，邀请客户携带真实物品到店体验。',
     platforms: ['私聊跟进', '朋友圈', '小红书'],
   },
-  data_notice: '当前使用内置演示数据，连接恢复后会自动切换到后端数据。',
+  data_notice: '当前使用本地演示数据，未调用 DeepSeek 或生产系统。',
 }
+
+const l80Evidence = [
+  { id: 'evidence-positioning', field: '车型定位', value: '智能双舱大五座旗舰 SUV', source_title: '乐道 L80 官方产品页', source_url: 'https://www.onvo.cn/l80', verified_at: '2026-07-18', source_type: '官方产品页' },
+  { id: 'evidence-price-full', field: '整车购买起价', value: '24.28 万元起', source_title: '乐道 L80 官方产品页', source_url: 'https://www.onvo.cn/l80', verified_at: '2026-07-18', source_type: '官方产品页' },
+]
+
+const reviewBody = '想象一个周六早晨：两个孩子、露营车和全家人的随身物品，都要一起出发。\n\n乐道 L80 定位为智能双舱大五座旗舰 SUV，当前官方页面显示整车购买 24.28 万元起。对重视空间的二孩家庭，建议把试驾重点放在满员乘坐和真实物品装载。\n\n具体配置、价格与权益以乐道官方最新信息为准。'
 
 export const fallbackWorkspace: WorkspaceResponse = {
   data_mode: 'demo',
@@ -33,10 +40,6 @@ export const fallbackWorkspace: WorkspaceResponse = {
       why_now: '近期咨询中有 18 位客户同时关注空间与补能，适合统一活动后再个性化跟进。', signal: '潜客分组 · L80 · 家庭体验活动',
       recommended_action: '为不同顾问生成朋友圈与私聊版本，抽样审核后触达。', due_label: '明天中午前', advisor_id: 'advisor-hz-02', vehicle_id: 'l80', campaign_id: 'camp-l80-family', customer: null,
     },
-    {
-      id: 'opp-space-topic', kind: 'topic', priority: 'medium', status: 'pending', title: '本周高频问题：满员状态下怎么装行李', source: '客户反馈聚合',
-      why_now: '过去 7 天出现 6 次相近问题，顾问缺少统一、可核验的解释素材。', signal: '高频顾虑 · 内容机会', recommended_action: '制作一条空间体验解释内容，并关联官方事实与试驾检查清单。', due_label: '本周完成', advisor_id: 'advisor-hz-02', vehicle_id: 'l80', campaign_id: 'camp-l80-family', customer: null,
-    },
   ],
   followups: [
     {
@@ -47,14 +50,26 @@ export const fallbackWorkspace: WorkspaceResponse = {
       ],
       events: [
         { id: 'event-1', type: 'customer_message', actor: '陈女士', time: '昨天 21:18', title: '客户追问空间', content: '第三排坐人以后，露营车和两个登机箱还能放下吗？这周日可以去看看。', status: 'received' },
-        { id: 'event-2', type: 'intent_detected', actor: '系统', time: '昨天 21:18', title: '识别为高意向', content: '出现明确试驾时间和具体家庭场景，建议在 24 小时内回应。', status: 'completed' },
       ],
+    },
+    {
+      customer_id: 'customer-xu', customer_name: '许先生', advisor_id: 'advisor-sh-01', vehicle_id: 'l60', stage: '预约中', next_action: '确认工作日晚间试驾时段。', next_action_due: '今天 17:00',
+      memories: [{ id: 'memory-xu-1', scope: 'customer', title: '到店时间偏好', value: '工作日晚上七点后', source: '小红书私信', updated_at: '2026-07-18 09:10', active: true }],
+      events: [{ id: 'event-xu-1', type: 'customer_message', actor: '许先生', time: '今天 09:10', title: '询问晚间试驾', content: '周三晚上七点后方便吗？', status: 'received' }],
     },
   ],
   reviews: [
-    { id: 'review-l80-001', task_id: 'task-l80-001', title: 'L80 家庭体验活动 · 朋友圈', advisor_id: 'advisor-hz-02', advisor_name: '周辰', vehicle_id: 'l80', status: 'pending', risk_level: 'medium', reason: '内容引用动态价格，发布前需再次确认官方页面。', content_excerpt: 'L80 当前官方页面显示整车购买 24.28 万元起，具体配置、价格与权益以乐道官方最新信息为准。', evidence_status: '已绑定 · 今日核验', submitted_at: '今天 10:16', decision_reason: '' },
+    {
+      id: 'review-l80-001', task_id: 'task-l80-001', variant_id: 'variant-review-l80', title: 'L80 家庭体验活动 · 朋友圈', content_title: '满员以后，怎么判断空间是否适合自己', advisor_id: 'advisor-hz-02', advisor_name: '周辰', vehicle_id: 'l80', platform: '朋友圈', status: 'pending', risk_level: 'medium', reason: '内容引用动态价格，发布前需再次确认官方页面。', body: reviewBody, call_to_action: '欢迎携带儿童推车和常用行李预约家庭场景试驾。',
+      claims: [{ id: 'claim-review-l80', text: '乐道 L80 定位为智能双舱大五座旗舰 SUV，当前官方页面显示整车购买 24.28 万元起。', evidence_id: 'evidence-positioning', field: '车型定位与价格' }],
+      risk_annotations: [{ id: 'risk-review-l80', text: '乐道 L80 定位为智能双舱大五座旗舰 SUV，当前官方页面显示整车购买 24.28 万元起。', level: 'info', rule: '动态事实复核', reason: '价格可能随时间和地区变化，发布前应再次核验。', suggestion: '乐道 L80 定位为智能双舱大五座旗舰 SUV，具体价格与权益以发布当天官方页面为准。' }],
+      evidence: l80Evidence, reviewed_body: reviewBody, reviewed_call_to_action: '欢迎携带儿童推车和常用行李预约家庭场景试驾。', evidence_status: '已绑定 · 本地演示', submitted_at: '今天 10:16', decision_reason: '', change_log: [],
+    },
   ],
   campaigns: [
-    { id: 'camp-l80-family', name: 'L80 家庭空间体验周', vehicle_id: 'l80', brief: '围绕二孩家庭满员乘坐、儿童用品收纳和周末出行，邀请客户携带真实物品到店体验。', channels: ['朋友圈', '私聊跟进', '小红书'], target_advisors: ['advisor-sh-01', 'advisor-hz-02', 'advisor-cd-03'], status: 'ready', created_by: '总部运营', task_summary: { total: 9, ready: 5, pending_review: 3, failed: 1 }, last_run: '尚未执行本轮' },
+    {
+      id: 'camp-l80-family', name: 'L80 家庭空间体验周', vehicle_id: 'l80', brief: '围绕二孩家庭满员乘坐、儿童用品收纳和周末出行，邀请客户携带真实物品到店体验。', channels: ['朋友圈', '私聊跟进', '小红书'], target_advisors: ['advisor-sh-01', 'advisor-hz-02', 'advisor-cd-03'], status: 'ready', created_by: '总部运营', task_summary: { total: 1, ready: 0, pending_review: 0, failed: 1 }, last_run: '本地演示初始状态',
+      tasks: [{ id: 'local-seed-failed', campaign_id: 'camp-l80-family', advisor_id: 'advisor-cd-03', advisor_name: '顾安', platform: '小红书', status: 'failed', failure_reason: '本地演示：上次任务超时，可点击重试。', retry_count: 0, generated_at: '', result: null, review_id: '' }],
+    },
   ],
 }

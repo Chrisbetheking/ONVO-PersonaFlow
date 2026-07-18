@@ -34,8 +34,7 @@ export function TodayPage() {
   return (
     <section className="today-page">
       <div className="section-intro">
-        <div><p className="eyebrow">今天先做什么</p><h2>按客户信号，而不是按消息数量排优先级</h2><p>每个机会都说明触发来源、现在值得处理的原因和推荐动作。演示数据不会伪装成实时 CRM。</p></div>
-        <div className="today-summary"><strong>{workspace.opportunities.filter(item => item.status !== 'done').length}</strong><span>项待处理</span><small>{workspace.opportunities.filter(item => item.priority === 'high' && item.status !== 'done').length} 项需要今天回应</small></div>
+        <div><p className="eyebrow">今天先做什么</p><h2>按客户信号，而不是按消息数量排优先级</h2><p>队列只保留会影响行动顺序的信息；选中一项后，在右侧查看完整客户上下文和推荐动作。</p></div>
       </div>
 
       <div className="filter-bar" aria-label="机会筛选">

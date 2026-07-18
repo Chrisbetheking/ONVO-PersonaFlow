@@ -1,4 +1,5 @@
 import type {
+  Advisor,
   BootstrapResponse,
   Campaign,
   ComplianceResult,
@@ -8,11 +9,32 @@ import type {
   LeadAnalysis,
   Opportunity,
   ReviewItem,
+  VideoJobState,
   WorkspaceResponse,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 const DEFAULT_TIMEOUT = 30000
+const WORKSPACE_KEY = 'weijian:workspace-id:v1'
+
+function createUuid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `browser-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+export function getWorkspaceId() {
+  try {
+    const current = window.localStorage.getItem(WORKSPACE_KEY)
+    if (current) return current
+    const created = createUuid()
+    window.localStorage.setItem(WORKSPACE_KEY, created)
+    return created
+  } catch {
+    return createUuid()
+  }
+}
+
+export const workspaceId = getWorkspaceId()
 
 async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const controller = new AbortController()
@@ -20,7 +42,11 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Workspace-Id': workspaceId,
+        ...(options?.headers || {}),
+      },
       ...options,
       signal: controller.signal,
     })
@@ -52,26 +78,36 @@ const post = <T>(path: string, payload: unknown, timeoutMs?: number) => request<
   timeoutMs,
 })
 
+const patch = <T>(path: string, payload: unknown) => request<T>(path, {
+  method: 'PATCH',
+  body: JSON.stringify(payload),
+})
+
 export const api = {
   baseUrl: API_BASE,
+  workspaceId,
   health: () => request<HealthResponse>('/api/health'),
   bootstrap: () => request<BootstrapResponse>('/api/bootstrap'),
   workspace: () => request<WorkspaceResponse>('/api/workspace'),
   opportunities: () => request<{ items: Opportunity[]; data_mode: string }>('/api/opportunities'),
   updateOpportunity: (id: string, status: Opportunity['status']) => post<Opportunity>(`/api/opportunities/${id}/status`, { status }),
+  updateAdvisor: (id: string, payload: Pick<Advisor, 'audience' | 'style'> & Partial<Pick<Advisor, 'platforms' | 'model_focus'>>) => patch<Advisor>(`/api/advisors/${id}`, payload),
   generate: (payload: Record<string, unknown>) => post<GenerationResponse>('/api/content/generate', payload, 90000),
   rewrite: (payload: Record<string, unknown>) => post<{ text: string; provider: string; ai_used: boolean }>('/api/content/rewrite', payload, 90000),
-  batchGenerate: (payload: Record<string, unknown>) => post<{ batch_id: string; advisor_count: number; variant_count: number; results: GenerationResponse[]; warnings: string[]; summary: Record<string, number> }>('/api/content/batch-generate', payload, 120000),
+  batchGenerate: (payload: Record<string, unknown>) => post<{ batch_id: string; advisor_count: number; variant_count: number; results: GenerationResponse[]; tasks: Campaign['tasks']; campaign: Campaign | null; warnings: string[]; summary: Record<string, number> }>('/api/content/batch-generate', payload, 120000),
+  retryCampaignTask: (campaignId: string, taskId: string) => post<Campaign>(`/api/campaigns/${campaignId}/tasks/${taskId}/retry`, {}, 90000),
+  retryFailedCampaignTasks: (campaignId: string) => post<Campaign>(`/api/campaigns/${campaignId}/retry-failed`, {}, 120000),
+  submitCampaignTaskReview: (campaignId: string, taskId: string) => post<ReviewItem>(`/api/campaigns/${campaignId}/tasks/${taskId}/submit-review`, {}),
   compliance: (payload: Record<string, unknown>) => post<ComplianceResult>('/api/compliance/check', payload),
   analyzeLeads: (messages: string[]) => post<LeadAnalysis>('/api/leads/analyze', { messages }),
   followups: () => request<{ items: Followup[]; data_mode: string }>('/api/followups'),
   addFollowupEvent: (customerId: string, payload: Record<string, unknown>) => post<Followup>(`/api/followups/${customerId}/events`, payload),
   toggleMemory: (customerId: string, memoryId: string, active: boolean) => post(`/api/followups/${customerId}/memories/${memoryId}`, { active }),
   reviews: () => request<{ items: ReviewItem[]; data_mode: string }>('/api/reviews'),
-  decideReview: (id: string, decision: 'approved' | 'returned', reason: string) => post<ReviewItem>(`/api/reviews/${id}/decision`, { decision, reason }),
+  decideReview: (id: string, decision: 'approved' | 'returned', reason: string, body: string, callToAction: string, riskAnnotations: ReviewItem['risk_annotations']) => post<ReviewItem>(`/api/reviews/${id}/decision`, { decision, reason, body, call_to_action: callToAction, risk_annotations: riskAnnotations }),
   campaigns: () => request<{ items: Campaign[]; data_mode: string }>('/api/campaigns'),
   saveDraft: (payload: Record<string, unknown>) => post('/api/drafts/save', payload),
   submitReview: (payload: Record<string, unknown>) => post<ReviewItem>('/api/drafts/submit-review', payload),
-  startVideo: (payload: Record<string, unknown>) => post<{ job_id: string; status: string; mode: string; message: string }>('/api/video/start', payload, 90000),
+  startVideo: (payload: Record<string, unknown>) => post<VideoJobState>('/api/video/start', payload, 90000),
   resetDemo: () => post<WorkspaceResponse>('/api/demo/reset', {}),
 }

@@ -1,195 +1,192 @@
-# 蔚见
+# 蔚见｜购车顾问私域经营 Agent
 
-> 面向购车顾问的私域经营 Agent：把客户问题转化为有事实依据的沟通内容、跟进行动与试驾机会。
+> 把客户真实问题转化成有事实依据、可审核、能推动试驾的沟通行动，并把后续反馈沉淀为下一次更准确的顾问记忆。
 
-蔚见不是单纯的文案生成器。它从“今天最值得处理什么”出发，结合客户阶段、顾问表达习惯、活动 Brief 与已核验车型事实，完成多渠道内容生成、逐句事实溯源、风险处理、门店审核、客户回复与记忆更新。
+ONVO PersonaFlow（产品名：**蔚见**）面向一线购车顾问、门店经理和总部运营。它不是单纯的文案生成器，而是覆盖“机会发现—客户理解—多平台内容—事实溯源—风险审核—客户跟进—试驾预约—记忆更新”的工作流原型。
 
 ## 业务问题
 
-一线购车顾问每天同时面对总部活动、客户私聊、朋友圈运营和试驾跟进。常见问题是：
-
-- 总部素材统一，但不同城市、门店和客户需要不同表达；
-- 顾问知道客户在问什么，却很难持续产出可信内容；
-- 价格、车型能力与辅助驾驶表述容易过期或越界；
-- 内容发出后，客户回复没有沉淀成下一次沟通依据；
-- 门店经理需要审核风险，但不应重复阅读所有低风险内容。
+购车顾问每天面对大量私聊、朋友圈活动和车型问题。统一素材难以匹配不同城市、客群和顾问表达方式；顾问自行创作又容易出现车型事实过期、价格权益表述不严谨、客户反馈无法沉淀等问题。蔚见将每一次内容任务放回具体客户、顾问、车型和活动上下文中，并要求事实与风险在发布前可定位、可修改、可追溯。
 
 ## 主要用户
 
-- **购车顾问**：处理今日机会、生成和编辑内容、跟进客户、沉淀记忆。
-- **门店经理**：只查看待审核、高风险、事实可能过期和未跟进事项。
-- **总部运营 / 管理员**：维护活动、顾问画像、车型事实、批量任务与系统连接。
+- **购车顾问**：处理今日机会、生成和编辑沟通内容、记录客户回复与试驾。
+- **门店经理**：查看完整正文和逐句依据，批准或退回内容。
+- **总部/门店运营**：执行活动批量任务、查看失败明细、重试和抽样审核。
 
-## 完整业务闭环
+## 完整闭环
 
 ```text
 总部活动 / 客户消息 / 历史反馈
-                ↓
-             今日机会
-                ↓
-       客户、顾问与场景理解
-                ↓
-      多渠道内容生成与局部编辑
-                ↓
-      逐句事实依据 + 风险替换建议
-                ↓
-          人工确认 / 门店审核
-                ↓
-          客户回复与试驾跟进
-                ↓
-       客户记忆与顾问客群记忆
-                ↓
-          下一轮机会推荐更准确
+              ↓
+          今日机会
+              ↓
+     客户、顾问与场景理解
+              ↓
+     私聊 / 朋友圈 / 小红书
+              ↓
+       事实依据与风险定位
+              ↓
+          门店逐句审核
+              ↓
+       客户回复与试驾预约
+              ↓
+        客户和顾问记忆更新
+              ↓
+        下一轮推荐更加准确
 ```
 
-## 核心功能
+## 90 秒演示路径
 
-### 今日机会
+1. 在“今日机会”选择“陈女士 · L80 家庭空间咨询”。
+2. 进入内容作战台，生成私聊、朋友圈和小红书三个版本。
+3. 点击正文中的事实陈述和风险表达，查看右侧来源、核验日期、原因和替换建议。
+4. 应用建议、保存并提交门店审核。
+5. 经理查看完整正文并批准。
+6. 在“跟进与记忆”补录客户回复，确认新增记忆。
+7. 打开试驾预约，编辑时间、携带物品和备注后确认。
+8. 在“活动与批量任务”查看单任务明细、失败原因、重试和抽样审核。
 
-- 汇总客户私聊、总部活动匹配和高频问题；
-- 展示为什么现在值得处理、意向信号、时间敏感性和推荐动作；
-- 支持优先级、来源、车型、状态筛选及稍后处理。
+完整讲解见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)。
 
-### 内容作战台
+## 核心能力
 
-- 左侧保留客户、顾问、活动和车型上下文；
-- 中间编辑私聊、朋友圈、小红书和短视频口播；
-- 支持局部改写、撤销/恢复、保存草稿、复制、导出和提交审核；
-- 右侧把正文陈述与事实依据、更新时间和风险建议关联起来；
-- 输出短视频口播、分镜、字幕和素材方向。
+- 按浏览器 UUID 隔离公开演示工作区，所有 API 携带 `X-Workspace-Id`。
+- 工作区状态具有 TTL、线程安全清理和当前会话独立重置。
+- 顾问画像、客户阶段、顾虑、活动 Brief 和车型事实共同参与生成。
+- 三个平台内容可编辑、撤销、保存、提交审核和局部改写。
+- 完整正文、CTA、claims、risk annotations 和 evidence 在审核中不丢失。
+- 批量任务保存顾问、平台、状态、失败原因、重试次数和生成结果。
+- 客户回复自动形成时间线事件和新记忆。
+- 试驾预约记录真实负责顾问、时间、地点、携带物品和备注。
+- 短视频区可提交已有 `/api/video/start`；未配置渲染服务时只保存脚本和分镜，不宣称已生成成片。
+- 后端或模型不可用时提供明确标记的本地规则演示闭环。
 
-### 跟进与记忆
+## 真实数据与演示数据边界
 
-- 以客户为中心展示发送、回复、意向识别、顾问补录和试驾预约时间线；
-- 支持修改、停用错误记忆；
-- 展示客户记忆与顾问客群记忆如何影响下一次生成；
-- 保留批量导入评论/私信并识别下一轮选题的能力。
+- 顾问、客户、活动、审核和跟进均为脱敏演示数据，界面会明确显示“脱敏演示数据”或“离线演示数据”。
+- 车型事实来自仓库内的公开资料适配层，保留来源标题、链接和核验日期；发布前仍需核验最新官方信息。
+- DeepSeek 仅在后端配置密钥后调用；模型不可用时使用规则和事实库兜底，不能伪装成 AI 结果。
+- 当前没有接入真实 CRM、企业微信、平台发布或试驾系统，不会自动联系客户或创建真实预约。
+- 公开演示状态保存在服务进程内，并非生产数据库；服务重启或 TTL 到期后会恢复初始状态。
 
-### 门店审核与批量任务
+## 系统架构
 
-- 逐条批准或退回，查看风险原因和事实状态；
-- 总部活动可选择多位顾问和渠道批量生成；
-- 展示任务状态、失败原因、重试和抽样审核入口。
+```text
+Vercel / Vite React 前端
+  ├─ localStorage workspace UUID
+  ├─ 今日机会 / 内容作战台 / 跟进 / 审核 / 批量任务
+  └─ 离线演示适配层
+                 │ X-Workspace-Id
+                 ▼
+Render / FastAPI 后端
+  ├─ WorkspaceStore：会话隔离、深复制、TTL、RLock
+  ├─ 规则内容引擎 + 车型事实
+  ├─ DeepSeek / OpenAI-compatible 可选增强
+  ├─ 逐句标注与合规检查
+  └─ 可选视频后端连接器
+```
 
-### 模型与可靠性
-
-- 支持 DeepSeek 或其他 OpenAI-compatible 接口；
-- API Key 只保存在后端；
-- 模型未配置、超时或失败时保留基于规则与事实库的可审核版本；
-- 演示数据明确标记，不伪装成真实生产数据。
-
-## 技术架构
-
-- 前端：React 18、TypeScript、Vite、Vitest；
-- 后端：FastAPI、Pydantic、HTTPX、Pytest；
-- 部署：Vercel（前端）+ Render（后端）；
-- 数据：当前原型使用集中式脱敏演示适配层，接口结构可替换为 CRM、活动和内容服务。
-
+详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)。设计参考边界见 [DESIGN_REFERENCE_MATRIX.md](./DESIGN_REFERENCE_MATRIX.md)。
 
 ## 本地运行
 
-### 后端
+要求：Python 3.12+、Node.js 22+、npm。
 
 ```bash
+# 后端
 cd backend
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
-健康检查：`http://localhost:8000/api/health`
-
-### 前端
-
 ```bash
+# 前端（另一个终端）
 cd frontend
 npm ci
-VITE_API_BASE=http://localhost:8000 npm run dev
+npm run dev
 ```
 
-访问：`http://localhost:5173`
-
-### 全量验证
-
-```bash
-./scripts/validate.sh
-```
+打开 `http://localhost:5173`。Vite 开发服务器会把 `/api` 代理到 `http://localhost:8000`。
 
 ## 环境变量
 
-复制根目录 `.env.example`，不要提交真实密钥。
+复制 `.env.example`，真实密钥只放后端部署环境：
 
-```bash
-# 前端
-VITE_API_BASE=http://localhost:8000
-
-# 后端跨域
+```env
 CORS_ORIGINS=http://localhost:5173
-
-# DeepSeek
 LLM_PROVIDER_MODE=deepseek
-DEEPSEEK_API_KEY=your_key
+DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_THINKING=disabled
-LLM_TIMEOUT_SECONDS=75
-LLM_MAX_TOKENS=2600
+VIDEO_BACKEND_URL=
+VIDEO_BACKEND_TOKEN=
 ```
 
-未配置模型时可使用：
+前端部署只需要：
 
-```bash
-LLM_PROVIDER_MODE=demo
+```env
+VITE_API_BASE=https://你的-render-后端地址
 ```
 
 ## 部署
 
 ### Render 后端
 
-仓库根目录已有 `render.yaml`，也可手工填写：
+仓库已提供 `render.yaml`。也可以手动配置：
 
 ```text
-Runtime: Python
 Root Directory: backend
 Build Command: pip install -r requirements.txt
 Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check: /api/health
 ```
 
-至少配置：`CORS_ORIGINS`。使用 DeepSeek 时再配置 `DEEPSEEK_API_KEY` 等变量。
+在 Render 设置 `CORS_ORIGINS` 为正式 Vercel 域名，并按需设置 DeepSeek 和视频服务密钥。
 
 ### Vercel 前端
 
 ```text
-Framework Preset: Vite
+Framework: Vite
 Root Directory: frontend
 Install Command: npm ci
 Build Command: npm run build
 Output Directory: dist
-Environment Variable: VITE_API_BASE=https://你的后端地址
 ```
 
-`frontend/vercel.json` 已处理单页应用刷新重写。
+设置 `VITE_API_BASE` 为 Render 基础地址。`frontend/vercel.json` 已包含 SPA 路由重写。
 
-## 90 秒演示路径
+完整检查见 [DEPLOY_CHECKLIST.md](./DEPLOY_CHECKLIST.md)。
 
-1. 打开“今日机会”，选择“陈女士 · L80 家庭空间咨询”；
-2. 说明系统根据客户最近消息判断“为什么现在值得处理”；
-3. 进入内容作战台，生成私聊、朋友圈和小红书版本；
-4. 点击正文陈述，展示对应车型事实、来源和核验时间；
-5. 展示风险表达的定位与替换建议，保存并提交门店审核；
-6. 在“跟进与记忆”补录客户回复并登记试驾；
-7. 展示该顾虑如何沉淀为客户记忆和顾问客群记忆。
+## 验证
 
-完整脚本见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)。
+```bash
+python3 -m compileall -q backend/app
+cd backend && PYTHONPATH=. python3 -m pytest -q
+cd ../frontend
+npm ci
+npm run typecheck
+npm test
+npx playwright install chromium
+npm run test:e2e
+npm audit --audit-level=moderate
+npm run build
+```
 
-## 当前边界
+## 当前限制与后续接入
 
-- 顾问、客户、活动和转化记录均为脱敏演示数据；
-- 当前工作区状态保存在后端进程内存中，生产环境应接数据库；
-- 车型事实使用仓库内的核验快照，正式接入需建立持续更新和审批机制；
-- 当前不自动发布内容，也不自动向客户发送消息；
-- 当前不直接连接真实 CRM、微信、小红书或试驾系统；
-- 生成与合规结果是辅助判断，最终由顾问或门店负责人确认；
-- 本项目为学生团队独立开发的产品原型，不代表蔚来或乐道官方系统。
+- **CRM**：以 `customer_id`、`advisor_id`、`campaign_id` 为稳定键，将演示适配层替换为 CRM 事件和客户资料 API。
+- **企业微信**：增加 OAuth、员工身份映射、会话回调与发送前人工确认；敏感字段需分级授权和审计。
+- **试驾系统**：将当前预约确认 payload 映射到真实可用时段、门店、车辆和参与人接口，并支持改约/取消状态回写。
+- **生产持久化**：将内存 WorkspaceStore 替换为 PostgreSQL/Redis，保留 workspace/session 边界、TTL 和审计记录。
+- **企业合规**：接入品牌规范、法务规则版本和人工审批权限，不能仅依赖模型判断。
+- **内容发布**：当前只生成、复制、导出和审核；生产环境需通过平台官方接口并保留用户确认。
+
+## 文档
+
+- [FEATURE_PARITY.md](./FEATURE_PARITY.md)：旧功能保留与新入口。
+- [TEST_REPORT.md](./TEST_REPORT.md)：实际执行的测试和已知边界。
+- [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)：90 秒、3 分钟和断网备用脚本。
+- [JUDGE_QA.md](./JUDGE_QA.md)：评委常见问题与真实回答。

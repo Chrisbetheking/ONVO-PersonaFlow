@@ -9,6 +9,7 @@ export type Advisor = {
   platforms: string[]
   experience_years: number
   private_domain_size: number
+  updated_at?: string
 }
 
 export type Vehicle = {
@@ -37,6 +38,7 @@ export type HealthResponse = {
   version: string
   knowledge_version: string
   provider: ProviderStatus
+  workspace_store?: { active_workspaces: number; ttl_seconds: number }
 }
 
 export type CustomerContext = {
@@ -164,6 +166,9 @@ export type FollowupEvent = {
   title: string
   content: string
   status: string
+  scheduled_at?: string
+  items?: string[]
+  notes?: string
 }
 
 export type Followup = {
@@ -181,17 +186,52 @@ export type Followup = {
 export type ReviewItem = {
   id: string
   task_id: string
+  variant_id?: string
   title: string
+  content_title: string
   advisor_id: string
   advisor_name: string
   vehicle_id: string
+  platform: string
   status: string
   risk_level: string
   reason: string
-  content_excerpt: string
+  body: string
+  call_to_action: string
+  claims: Claim[]
+  risk_annotations: RiskAnnotation[]
+  evidence: Evidence[]
+  reviewed_body: string
+  reviewed_call_to_action: string
   evidence_status: string
   submitted_at: string
   decision_reason: string
+  decision_at?: string
+  change_log?: Array<{ at: string; decision: string; reason: string; body_changed: boolean; cta_changed: boolean }>
+}
+
+export type CampaignTaskResult = {
+  task_id: string
+  campaign_name: string
+  vehicle: Vehicle
+  variant: ContentVariant
+  evidence: Evidence[]
+  video_package: GenerationResponse['video_package']
+  audit: GenerationResponse['audit']
+}
+
+export type CampaignTask = {
+  id: string
+  campaign_id: string
+  advisor_id: string
+  advisor_name: string
+  platform: string
+  status: 'ready' | 'needs_review' | 'failed' | 'submitted'
+  failure_reason: string
+  retry_count: number
+  generated_at: string
+  result: CampaignTaskResult | null
+  review_id: string
 }
 
 export type Campaign = {
@@ -204,6 +244,7 @@ export type Campaign = {
   status: string
   created_by: string
   task_summary: { total: number; ready: number; pending_review: number; failed: number }
+  tasks: CampaignTask[]
   last_run: string
 }
 
@@ -230,4 +271,11 @@ export type LeadAnalysis = {
   top_concerns: Array<{ topic: string; count: number }>
   leads: Array<{ id: string; text: string; intent: string; concern: string; next_action: string; recommended_reply: string }>
   next_content_topics: string[]
+}
+
+export type VideoJobState = {
+  job_id: string
+  status: 'preview' | 'queued' | 'submitted' | 'failed' | string
+  mode: string
+  message: string
 }

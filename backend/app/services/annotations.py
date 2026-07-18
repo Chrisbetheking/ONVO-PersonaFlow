@@ -27,11 +27,11 @@ def annotate_variant(variant: dict[str, Any], evidence: list[dict[str, Any]], co
             "field": item["field"],
         })
 
-    dynamic_sentence = next((sentence for sentence in _sentences(combined) if any(term in sentence for term in ("万元", "价格", "权益"))), "")
-    if dynamic_sentence:
+    disclaimer_sentence = next((sentence for sentence in _sentences(combined) if "以乐道官方最新信息为准" in sentence or "以发布当天官方页面为准" in sentence), "")
+    if disclaimer_sentence:
         risks.append({
             "id": f"risk-{variant['id']}-dynamic",
-            "text": dynamic_sentence,
+            "text": disclaimer_sentence,
             "level": "info",
             "rule": "动态事实复核",
             "reason": "价格与权益可能随时间和地区变化，发布前应再次核验官方页面。",

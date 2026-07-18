@@ -10,10 +10,10 @@ export function RiskPanel({ risks, activeId, onSelect, onApplySuggestion }: { ri
         const Icon = item.level === 'info' ? Info : AlertTriangle
         const tone = item.level === 'block' ? 'danger' : item.level === 'warning' ? 'warning' : 'info'
         return (
-          <div id={`risk-${item.id}`} className={activeId === item.id ? `trust-item risk-item ${tone} active` : `trust-item risk-item ${tone}`} key={item.id} onClick={() => onSelect(item.id)}>
+          <div data-testid={`risk-${item.id}`} id={`risk-${item.id}`} className={activeId === item.id ? `trust-item risk-item ${tone} active` : `trust-item risk-item ${tone}`} key={item.id} onClick={() => onSelect(item.id)}>
             <span className="trust-icon"><Icon size={17} /></span>
             <span className="trust-copy"><span className="trust-title"><strong>{item.rule}</strong><StatusPill tone={tone}>{item.level === 'block' ? '阻断' : item.level === 'warning' ? '需修改' : '发布前确认'}</StatusPill></span><span className="trust-value">{item.reason}</span><small>建议：{item.suggestion}</small></span>
-            {item.level !== 'info' ? <button className="text-action" onClick={event => { event.stopPropagation(); onApplySuggestion(item) }}>应用建议</button> : null}
+            {item.suggestion ? <button data-testid={`apply-risk-${item.id}`} className="text-action" onClick={event => { event.stopPropagation(); onApplySuggestion(item) }}>应用建议</button> : null}
           </div>
         )
       })}

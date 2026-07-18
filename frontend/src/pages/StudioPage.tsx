@@ -22,6 +22,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
     addFollowupEvent,
     updateOpportunityStatus,
     showToast,
+    startVideo,
   } = useApp()
   const requestedId = params.get('opportunity')
   const defaultOpportunity = workspace.opportunities.find(item => item.id === requestedId)
@@ -86,7 +87,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
     }
   }
 
-  function updateVariant(patch: Partial<Pick<ContentVariant, 'title' | 'body' | 'call_to_action'>>) {
+  function updateVariant(patch: Partial<Pick<ContentVariant, 'title' | 'body' | 'call_to_action' | 'risk_annotations'>>) {
     if (!activeVariant) return
     const updated = { ...activeVariant, ...patch }
     setVariants(current => current.map(item => item.id === activeVariant.id ? updated : item))
@@ -149,7 +150,10 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
   function applyRiskSuggestion(risk: RiskAnnotation) {
     if (!activeVariant || !risk.text) return
     const replacement = risk.suggestion.includes('具体配置') ? '具体配置、价格与权益以乐道官方最新信息为准。' : risk.suggestion
-    updateVariant({ body: activeVariant.body.replace(risk.text, replacement) })
+    updateVariant({
+      body: activeVariant.body.replace(risk.text, replacement),
+      risk_annotations: activeVariant.risk_annotations.map(item => item.id === risk.id ? { ...item, text: replacement, level: 'info', reason: '建议已应用，发布前仍需完成最终人工确认。' } : item),
+    })
     showToast('已应用建议，请再读一遍上下文')
   }
 
@@ -216,7 +220,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
             <p>系统会同时生成私聊、朋友圈和小红书版本。客户身份只用于一对一内容，公开平台不会泄露客户信息。</p>
             <div className="start-checklist"><span><CheckCircle2 size={17} />已读取顾问表达习惯</span><span><CheckCircle2 size={17} />已关联车型官方事实</span><span><CheckCircle2 size={17} />已带入客户顾虑与最近消息</span></div>
             {error ? <ErrorState description={error} /> : null}
-            <Button loading={generating} onClick={() => void startGeneration()}><Sparkles size={17} />生成沟通方案</Button>
+            <Button data-testid="generate-content" loading={generating} onClick={() => void startGeneration()}><Sparkles size={17} />生成沟通方案</Button>
             <small>模型不可用时会自动保留有明确标记的规则兜底版本，不会伪装成模型结果。</small>
           </div>
         </div>
@@ -228,7 +232,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
           </aside>
 
           <div className="content-column">
-            <div className="platform-tabs" role="tablist">{variants.map(item => <button role="tab" aria-selected={activeVariant.id === item.id} className={activeVariant.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveVariantId(item.id)}>{item.platform}<span>{item.version > 1 ? `v${item.version}` : ''}</span></button>)}</div>
+            <div className="platform-tabs" role="tablist">{variants.map(item => <button data-testid={`platform-tab-${item.platform}`} role="tab" aria-selected={activeVariant.id === item.id} className={activeVariant.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveVariantId(item.id)}>{item.platform}<span>{item.version > 1 ? `v${item.version}` : ''}</span></button>)}</div>
             {generation.audit.ai_warning ? <div className="model-warning">{generation.audit.ai_warning}</div> : null}
             <ContentEditor
               variant={activeVariant}
@@ -250,10 +254,10 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
               rewriting={rewriting}
             />
             <div className="studio-lower-actions">
-              <button onClick={() => setShowVideo(value => !value)}><Film size={17} />{showVideo ? '收起短视频方案' : '查看短视频方案'}<ChevronRight className={showVideo ? 'rotate-90' : ''} size={15} /></button>
-              {opportunity?.customer ? <Button variant="secondary" onClick={() => void markSent()}><MessageCircleReply size={16} />记录为已发送并进入跟进</Button> : null}
+              <button data-testid="video-package-toggle" onClick={() => setShowVideo(value => !value)}><Film size={17} />{showVideo ? '收起短视频方案' : '查看短视频方案'}<ChevronRight className={showVideo ? 'rotate-90' : ''} size={15} /></button>
+              {opportunity?.customer ? <Button data-testid="mark-content-sent" variant="secondary" onClick={() => void markSent()}><MessageCircleReply size={16} />记录为已发送并进入跟进</Button> : null}
             </div>
-            {showVideo ? <VideoPackage generation={generation} /> : null}
+            {showVideo ? <VideoPackage generation={generation} advisorId={advisor!.id} onStart={startVideo} /> : null}
           </div>
 
           <aside className="trust-panel">
@@ -278,11 +282,29 @@ function ContextDetails({ opportunity, advisor, vehicle, campaignName }: { oppor
   )
 }
 
-function VideoPackage({ generation }: { generation: NonNullable<ReturnType<typeof useApp>['generation']> }) {
+function VideoPackage({ generation, advisorId, onStart }: { generation: NonNullable<ReturnType<typeof useApp>['generation']>; advisorId: string; onStart: (payload: Record<string, unknown>) => Promise<import('../types').VideoJobState> }) {
+  const [submitting, setSubmitting] = useState(false)
+  const [job, setJob] = useState<import('../types').VideoJobState | null>(null)
+
+  async function submitVideo() {
+    setSubmitting(true)
+    try {
+      setJob(await onStart({ task_id: generation.task_id, advisor_id: advisorId, video_package: generation.video_package }))
+    } catch (error) {
+      setJob({ job_id: '', status: 'failed', mode: 'connected', message: error instanceof Error ? error.message : '视频任务提交失败' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
-    <div className="video-package">
-      <div><p className="eyebrow">短视频草稿</p><h3>{generation.video_package.hook}</h3><p>{generation.video_package.voiceover}</p></div>
+    <div className="video-package" data-testid="video-package">
+      <div><p className="eyebrow">短视频脚本与分镜</p><h3>{generation.video_package.hook}</h3><p>{generation.video_package.voiceover}</p></div>
       <ol>{generation.video_package.shots.map(shot => <li key={shot.index}><span>{shot.index.toString().padStart(2, '0')}</span><div><strong>{shot.visual}</strong><p>{shot.subtitle}</p><small>{shot.duration}s · {shot.asset_hint}</small></div></li>)}</ol>
+      <div className="video-submit-row">
+        <Button data-testid="submit-video-task" loading={submitting} onClick={() => void submitVideo()}><Film size={16} />提交视频任务</Button>
+        {job ? <div data-testid="video-job-status" className={`video-job video-job-${job.status}`}><strong>{job.status === 'preview' ? '仅保存脚本与分镜' : job.status === 'queued' ? '已排队' : job.status === 'submitted' ? '已提交渲染服务' : '提交失败'}</strong><p>{job.message}</p>{job.job_id ? <small>任务编号：{job.job_id}</small> : null}</div> : <small>未提交前不代表已经生成成片。</small>}
+      </div>
     </div>
   )
 }
