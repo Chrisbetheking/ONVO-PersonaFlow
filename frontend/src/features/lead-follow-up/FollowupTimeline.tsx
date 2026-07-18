@@ -14,7 +14,7 @@ export function FollowupTimeline({ events }: { events: FollowupEvent[] }) {
     <ol className="timeline">
       {events.map(event => {
         const Icon = iconMap[event.type] || UserRound
-        return <li key={event.id}><span className="timeline-icon"><Icon size={17} /></span><div className="timeline-body"><div><strong>{event.title}</strong><span>{event.time}</span></div><p>{event.content}</p><small>{event.actor}</small></div></li>
+        return <li key={event.id} data-testid={`timeline-event-${event.id}`} data-event-type={event.type}><span className="timeline-icon"><Icon size={17} /></span><div className="timeline-body"><div><strong>{event.title}</strong><span>{event.time}</span></div><p>{event.content}</p><small>{event.actor}</small></div></li>
       })}
     </ol>
   )

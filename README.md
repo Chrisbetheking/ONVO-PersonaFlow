@@ -187,6 +187,9 @@ npm run build
 ## 文档
 
 - [FEATURE_PARITY.md](./FEATURE_PARITY.md)：旧功能保留与新入口。
-- [TEST_REPORT.md](./TEST_REPORT.md)：实际执行的测试和已知边界。
+- [TEST_REPORT.md](./TEST_REPORT.md)：实际执行的测试、环境限制和手工验收。
+- [DEPLOY_CHECKLIST.md](./DEPLOY_CHECKLIST.md)：Render、Vercel、CI 和上线检查。
 - [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)：90 秒、3 分钟和断网备用脚本。
+- [ARCHITECTURE.md](./ARCHITECTURE.md)：前后端模块、数据流和会话隔离。
 - [JUDGE_QA.md](./JUDGE_QA.md)：评委常见问题与真实回答。
+- [DESIGN_REFERENCE_MATRIX.md](./DESIGN_REFERENCE_MATRIX.md)：已完成页面的交互参考边界。

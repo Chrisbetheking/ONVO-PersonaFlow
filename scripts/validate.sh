@@ -2,28 +2,34 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "[1/8] Python compile"
+printf '[1/10] Python compile\n'
 python3 -m compileall -q "$ROOT/backend/app"
 
-echo "[2/8] Backend tests"
+printf '[2/10] Backend tests\n'
 (cd "$ROOT/backend" && PYTHONPATH=. python3 -m pytest -q)
 
-echo "[3/8] Frontend dependencies"
+printf '[3/10] Frontend dependencies\n'
 (cd "$ROOT/frontend" && npm ci)
 
-echo "[4/8] Frontend typecheck"
+printf '[4/10] Frontend typecheck\n'
 (cd "$ROOT/frontend" && npm run typecheck)
 
-echo "[5/8] Frontend unit tests"
+printf '[5/10] Frontend unit tests\n'
 (cd "$ROOT/frontend" && npm test)
 
-echo "[6/8] Playwright E2E"
+printf '[6/10] Playwright Chromium\n'
+(cd "$ROOT/frontend" && npx playwright install chromium)
+
+printf '[7/10] Playwright E2E\n'
 (cd "$ROOT/frontend" && npm run test:e2e)
 
-echo "[7/8] Frontend security audit"
+printf '[8/10] Frontend security audit\n'
 (cd "$ROOT/frontend" && npm audit --audit-level=moderate)
 
-echo "[8/8] Frontend production build"
+printf '[9/10] Frontend production build\n'
 (cd "$ROOT/frontend" && npm run build)
 
-echo "Validation passed."
+printf '[10/10] Release integrity\n'
+(cd "$ROOT" && python3 scripts/release_integrity.py)
+
+printf 'Validation passed.\n'
