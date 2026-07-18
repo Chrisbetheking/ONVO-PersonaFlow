@@ -13,16 +13,16 @@ from pydantic import BaseModel, Field
 from .services.compliance import check_content
 from .services.content_engine import generate_content
 from .services.lead_engine import analyze as analyze_leads
-from .services.llm_provider import enhance_result, is_enabled, provider_mode
+from .services.llm_provider import enhance_result, is_enabled, provider_status
 from .services.store import advisors, get_advisor, get_vehicle, vehicles
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 KNOWLEDGE_VERSION = "onvo-cn-2026.07.18"
 
 app = FastAPI(
-    title="ONVO PersonaFlow API",
+    title="PersonaFlow API",
     version=APP_VERSION,
-    description="Competition prototype for advisor-personalized, grounded and compliant social content.",
+    description="Advisor-personalized, grounded and reviewable social content workspace.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -82,13 +82,12 @@ def _safe_get_vehicle(vehicle_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "mode": "llm-assisted" if is_enabled() else "competition-demo",
-        "llm_provider_mode": provider_mode(),
         "version": APP_VERSION,
         "knowledge_version": KNOWLEDGE_VERSION,
+        "provider": provider_status(),
     }
 
 
@@ -97,17 +96,12 @@ def bootstrap() -> dict[str, Any]:
     return {
         "advisors": advisors(),
         "vehicles": [{key: value for key, value in item.items() if key != "verified_facts"} for item in vehicles()],
-        "metrics": {
-            "content_generated": 1286,
-            "advisors_activated": 186,
-            "compliance_pass_rate": 98.6,
-            "high_intent_leads": 73,
+        "defaults": {
+            "campaign_name": "周末家庭用车体验",
+            "campaign_brief": "围绕真实家庭周末出行场景，说明空间、补能和日常使用体验，引导用户按自己的路线预约试驾。",
+            "platforms": ["朋友圈", "小红书", "抖音口播", "私聊跟进"],
         },
-        "campaigns": [
-            {"name": "L80 二孩家庭空间季", "advisors": 42, "variants": 168, "compliance": 99.1},
-            {"name": "L60 城市通勤种草", "advisors": 36, "variants": 144, "compliance": 98.4},
-            {"name": "L90 三代同堂体验日", "advisors": 28, "variants": 112, "compliance": 97.8},
-        ],
+        "data_notice": "当前为脱敏示例顾问画像；车型事实来自公开官方页面并保留核验日期。",
     }
 
 
@@ -122,17 +116,22 @@ async def content_generate(request: GenerateRequest) -> dict[str, Any]:
         campaign_brief=request.campaign_brief,
         platforms=request.platforms,
     )
-    if request.use_llm and is_enabled():
-        try:
-            result = await enhance_result(
-                result,
-                advisor=advisor,
-                vehicle=vehicle,
-                campaign_name=request.campaign_name,
-                campaign_brief=request.campaign_brief,
-            )
-        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-            raise HTTPException(status_code=502, detail=f"Configured LLM generation failed: {exc}") from exc
+    result["audit"].update({"ai_used": False, "provider": "规则引擎", "model": "grounded-template"})
+
+    if request.use_llm:
+        if is_enabled():
+            try:
+                result = await enhance_result(
+                    result,
+                    advisor=advisor,
+                    vehicle=vehicle,
+                    campaign_name=request.campaign_name,
+                    campaign_brief=request.campaign_brief,
+                )
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                result["audit"]["ai_warning"] = f"AI 调用失败，已保留可审核的基础版本：{exc}"
+        else:
+            result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
     return result
 
 
@@ -142,6 +141,7 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
         raise HTTPException(status_code=422, detail="advisor_ids must not contain duplicates")
     vehicle = _safe_get_vehicle(request.vehicle_id)
     results: list[dict[str, Any]] = []
+    warnings: list[str] = []
     for advisor_id in request.advisor_ids:
         advisor = _safe_get_advisor(advisor_id)
         result = generate_content(
@@ -151,6 +151,7 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
             campaign_brief=request.campaign_brief,
             platforms=request.platforms,
         )
+        result["audit"].update({"ai_used": False, "provider": "规则引擎", "model": "grounded-template"})
         if request.use_llm and is_enabled():
             try:
                 result = await enhance_result(
@@ -161,7 +162,7 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
                     campaign_brief=request.campaign_brief,
                 )
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-                raise HTTPException(status_code=502, detail=f"Configured LLM batch generation failed for {advisor_id}: {exc}") from exc
+                warnings.append(f"{advisor['name']}：{exc}")
         results.append(result)
     personalization_scores = [variant["personalization_score"] for result in results for variant in result["variants"]]
     compliance_scores = [variant["compliance_score"] for result in results for variant in result["variants"]]
@@ -170,6 +171,7 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
         "advisor_count": len(results),
         "variant_count": sum(len(result["variants"]) for result in results),
         "results": results,
+        "warnings": warnings,
         "summary": {
             "avg_personalization": round(mean(personalization_scores), 1) if personalization_scores else 0,
             "avg_compliance": round(mean(compliance_scores), 1) if compliance_scores else 0,
@@ -198,16 +200,16 @@ async def video_start(request: VideoRequest) -> dict[str, str]:
         return {
             "job_id": f"demo-video-{uuid4().hex[:10]}",
             "status": "queued",
-            "mode": "safe-demo",
-            "message": "已创建演示视频任务；配置 VIDEO_BACKEND_URL 后可连接独立的视频渲染服务。",
+            "mode": "preview",
+            "message": "已保存短视频脚本与分镜。配置独立渲染服务后可继续生成成片。",
         }
 
     payload = {
-        "title": request.video_package.get("hook", "ONVO PersonaFlow competition video"),
+        "title": request.video_package.get("hook", "购车顾问短视频"),
         "script": request.video_package.get("voiceover", ""),
         "manual_shot_plan": request.video_package.get("shots", []),
         "metadata": {
-            "source": "onvo-personaflow-competition",
+            "source": "personaflow",
             "task_id": request.task_id,
             "advisor_id": request.advisor_id,
             "contains_real_customer_data": False,
@@ -218,15 +220,15 @@ async def video_start(request: VideoRequest) -> dict[str, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(f"{backend_url}/api/video/full-ai/tts-first/start", json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(f"{backend_url}/api/full-ai/start", json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=f"Video backend unavailable: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"视频服务调用失败：{exc}") from exc
     return {
-        "job_id": str(data.get("job_id") or data.get("id") or uuid4().hex),
+        "job_id": str(data.get("job_id") or data.get("id") or f"video-{uuid4().hex[:10]}"),
         "status": str(data.get("status") or "submitted"),
-        "mode": "external-sanitized-connector",
-        "message": "视频任务已提交到独立渲染服务。",
+        "mode": "connected",
+        "message": "短视频任务已提交。",
     }

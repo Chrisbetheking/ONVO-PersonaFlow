@@ -10,6 +10,14 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: LLM_PROVIDER_MODE
-        value: demo
+        value: deepseek
+      - key: DEEPSEEK_BASE_URL
+        value: https://api.deepseek.com
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
+      - key: DEEPSEEK_THINKING
+        value: disabled
       - key: CORS_ORIGINS
+        sync: false
+      - key: DEEPSEEK_API_KEY
         sync: false

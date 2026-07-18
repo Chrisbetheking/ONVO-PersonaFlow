@@ -1,1 +1,1 @@
-"""ONVO PersonaFlow competition backend."""
+"""PersonaFlow backend."""

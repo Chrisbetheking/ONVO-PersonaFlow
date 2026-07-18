@@ -1,48 +1,55 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Activity,
+  AlertTriangle,
+  ArrowRight,
   BadgeCheck,
-  BarChart3,
-  BookOpenCheck,
+  BookOpen,
   Bot,
   Boxes,
-  BrainCircuit,
+  BriefcaseBusiness,
   Check,
+  CheckCircle2,
   ChevronRight,
-  CircleAlert,
-  CircleCheckBig,
-  ClipboardCheck,
-  Clock3,
-  Database,
+  Clipboard,
+  Copy,
+  Download,
+  FileCheck2,
   FileVideo2,
   Gauge,
-  LayoutDashboard,
+  Home,
   LoaderCircle,
   MapPin,
-  MessageCircleMore,
+  MessageCircle,
   MessagesSquare,
   Play,
   RefreshCw,
-  Rocket,
-  SearchCheck,
   Send,
   ShieldCheck,
   Sparkles,
-  Target,
+  UserRound,
   Users,
   WandSparkles,
   X,
   Zap,
 } from 'lucide-react'
-import { api, type Advisor, type ContentVariant, type GenerationResponse, type LeadAnalysis, type Vehicle } from './api'
+import {
+  api,
+  type Advisor,
+  type ComplianceResult,
+  type ContentVariant,
+  type GenerationResponse,
+  type HealthResponse,
+  type LeadAnalysis,
+  type Vehicle,
+} from './api'
 
-type View = 'dashboard' | 'persona' | 'factory' | 'batch' | 'compliance' | 'leads' | 'analytics'
+type View = 'create' | 'advisors' | 'batch' | 'review' | 'leads' | 'about'
 
 type Bootstrap = {
   advisors: Advisor[]
   vehicles: Vehicle[]
-  metrics: Record<string, number>
-  campaigns: Array<Record<string, string | number>>
+  defaults: { campaign_name: string; campaign_brief: string; platforms: string[] }
+  data_notice: string
 }
 
 const fallbackAdvisors: Advisor[] = [
@@ -52,123 +59,147 @@ const fallbackAdvisors: Advisor[] = [
 ]
 
 const fallbackVehicles: Vehicle[] = [
-  { id: 'l60', name: '乐道 L60', positioning: '中型 SUV 科技旗舰', full_purchase_from: '19.28 万元起', baas_from: '13.58 万元起', scenarios: ['通勤', '周末郊游', '年轻家庭'], source_title: '乐道汽车官方产品页', source_url: 'https://www.onvo.cn/l60', verified_at: '2026-07-18' },
-  { id: 'l80', name: '乐道 L80', positioning: '智能双舱大五座旗舰 SUV', full_purchase_from: '24.28 万元起', baas_from: '15.68 万元起', scenarios: ['二孩家庭', '大五座空间', '长途出行'], source_title: '乐道汽车官方产品页', source_url: 'https://www.onvo.cn/l80', verified_at: '2026-07-18' },
-  { id: 'l90', name: '乐道 L90', positioning: '智能大空间旗舰 SUV', full_purchase_from: '26.58 万元起', baas_from: '17.98 万元起', scenarios: ['三代同堂', '多人出行', '大空间需求'], source_title: '乐道汽车官方产品页', source_url: 'https://www.onvo.cn/l90', verified_at: '2026-07-18' },
+  { id: 'l60', name: '乐道 L60', positioning: '中型 SUV 科技旗舰', full_purchase_from: '19.28 万元起', baas_from: '13.58 万元起', scenarios: ['城市通勤', '年轻家庭', '周末郊游'], source_title: '乐道 L60 官方产品页', source_url: 'https://www.onvo.cn/l60', verified_at: '2026-07-18' },
+  { id: 'l80', name: '乐道 L80', positioning: '智能双舱大五座旗舰 SUV', full_purchase_from: '24.28 万元起', baas_from: '15.68 万元起', scenarios: ['二孩家庭', '大五座空间', '长途出行'], source_title: '乐道 L80 官方产品页', source_url: 'https://www.onvo.cn/l80', verified_at: '2026-07-18' },
+  { id: 'l90', name: '乐道 L90', positioning: '智能大空间旗舰 SUV', full_purchase_from: '26.58 万元起', baas_from: '17.98 万元起', scenarios: ['三代同堂', '多人出行', '家庭大三排'], source_title: '乐道 L90 官方产品页', source_url: 'https://www.onvo.cn/l90', verified_at: '2026-07-18' },
 ]
 
-const sampleLeadMessages = [
+const sampleLeads = [
   '家里两个孩子，L80 第二排和后备箱够不够用？周末经常露营。',
   'BaaS 到底怎么选？想先了解全购和租电的差别。',
   '上海最近能不能约 L60 试驾？我工作日晚上有空。',
   '辅助驾驶是不是可以完全不用管方向盘？',
-  'L90 三代人一起坐，第三排成年人会不会挤？',
-  '我只是随便看看，目前没有换车计划。',
+].join('\n')
+
+const platformOptions = ['朋友圈', '小红书', '抖音口播', '视频号口播', '私聊跟进']
+
+const navigation: Array<{ id: View; label: string; hint: string; icon: typeof Home }> = [
+  { id: 'create', label: '内容任务', hint: '从需求到可发布内容', icon: Home },
+  { id: 'advisors', label: '顾问与门店', hint: '管理表达与客群差异', icon: Users },
+  { id: 'batch', label: '批量生成', hint: '一个活动，多位顾问', icon: Boxes },
+  { id: 'review', label: '审核中心', hint: '事实、风险与发布闸门', icon: ShieldCheck },
+  { id: 'leads', label: '客户反馈', hint: '把评论变成下一条内容', icon: MessagesSquare },
+  { id: 'about', label: '方案说明', hint: '看清系统怎样工作', icon: BriefcaseBusiness },
 ]
 
-const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard; hint: string }> = [
-  { id: 'dashboard', label: '业务驾驶舱', icon: LayoutDashboard, hint: '全局效果与任务' },
-  { id: 'persona', label: '顾问画像中心', icon: Users, hint: '千人千面底座' },
-  { id: 'factory', label: 'AI 内容工厂', icon: WandSparkles, hint: '多平台内容生成' },
-  { id: 'batch', label: '规模化分发', icon: Boxes, hint: '门店批量生产' },
-  { id: 'compliance', label: '品牌合规审校', icon: ShieldCheck, hint: '事实与风险核验' },
-  { id: 'leads', label: '线索增长闭环', icon: MessagesSquare, hint: '评论私信反哺' },
-  { id: 'analytics', label: '效果评估', icon: BarChart3, hint: '可量化验收' },
-]
-
-function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'good' | 'warn' | 'accent' }) {
-  return <span className={`pill pill-${tone}`}>{children}</span>
+const pageTitles: Record<View, { title: string; subtitle: string }> = {
+  create: { title: '新建内容任务', subtitle: '先确定顾问、车型和真实传播目标，再生成不同平台的版本。' },
+  advisors: { title: '顾问与门店', subtitle: '画像不是标签堆砌，而是决定内容说什么、怎么说、对谁说。' },
+  batch: { title: '批量生成', subtitle: '总部只配置一次活动，门店顾问得到符合自身客群和表达习惯的版本。' },
+  review: { title: '审核中心', subtitle: '把事实来源和风险检查放在发布之前。' },
+  leads: { title: '客户反馈', subtitle: '识别真实问题、跟进优先级，并把高频顾虑变成下一轮选题。' },
+  about: { title: '方案说明', subtitle: '这不是文案生成器，而是一套可审、可追溯、可规模化的内容工作流。' },
 }
 
-function MetricCard({ label, value, suffix, icon: Icon, detail, trend }: { label: string; value: string | number; suffix?: string; icon: typeof Activity; detail: string; trend?: string }) {
-  return (
-    <article className="metric-card">
-      <div className="metric-card-top"><span className="metric-icon"><Icon size={18} /></span>{trend && <Pill tone="good">{trend}</Pill>}</div>
-      <div className="metric-value">{value}<small>{suffix}</small></div>
-      <div className="metric-label">{label}</div>
-      <div className="metric-detail">{detail}</div>
-    </article>
-  )
+function cx(...items: Array<string | false | undefined>) {
+  return items.filter(Boolean).join(' ')
 }
 
-function ScoreRing({ score, label }: { score: number; label: string }) {
-  const safe = Math.max(0, Math.min(100, score))
-  return (
-    <div className="score-ring-wrap">
-      <div className="score-ring" style={{ background: `conic-gradient(var(--lime) ${safe * 3.6}deg, rgba(255,255,255,.08) 0deg)` }}>
-        <div><strong>{safe}</strong><small>分</small></div>
-      </div>
-      <span>{label}</span>
-    </div>
-  )
+function StatusDot({ online }: { online: boolean }) {
+  return <span className={cx('status-dot', online && 'online')} />
+}
+
+function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'good' | 'warn' | 'dark' }) {
+  return <span className={cx('badge', `badge-${tone}`)}>{children}</span>
+}
+
+function Empty({ icon: Icon, title, text }: { icon: typeof Bot; title: string; text: string }) {
+  return <div className="empty"><span><Icon size={24} /></span><h3>{title}</h3><p>{text}</p></div>
 }
 
 function App() {
-  const [view, setView] = useState<View>('dashboard')
-  const [boot, setBoot] = useState<Bootstrap>({ advisors: fallbackAdvisors, vehicles: fallbackVehicles, metrics: {}, campaigns: [] })
-  const [backendOnline, setBackendOnline] = useState(false)
-  const [selectedAdvisorId, setSelectedAdvisorId] = useState(fallbackAdvisors[0].id)
-  const [selectedVehicleId, setSelectedVehicleId] = useState(fallbackVehicles[0].id)
-  const [campaignName, setCampaignName] = useState('周末家庭出行种草计划')
-  const [campaignBrief, setCampaignBrief] = useState('围绕真实家庭周末出行场景，突出空间、补能便利与适合家庭的体验，引导预约试驾。')
-  const [platforms, setPlatforms] = useState(['小红书', '朋友圈', '抖音口播', '私聊跟进'])
+  const [view, setView] = useState<View>('create')
+  const [boot, setBoot] = useState<Bootstrap>({
+    advisors: fallbackAdvisors,
+    vehicles: fallbackVehicles,
+    defaults: {
+      campaign_name: '周末家庭用车体验',
+      campaign_brief: '围绕真实家庭周末出行场景，说明空间、补能和日常使用体验，引导用户按自己的路线预约试驾。',
+      platforms: ['朋友圈', '小红书', '抖音口播', '私聊跟进'],
+    },
+    data_notice: '当前使用脱敏示例顾问画像。',
+  })
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [connectionError, setConnectionError] = useState('')
+  const [advisorId, setAdvisorId] = useState(fallbackAdvisors[0].id)
+  const [vehicleId, setVehicleId] = useState(fallbackVehicles[0].id)
+  const [campaignName, setCampaignName] = useState('周末家庭用车体验')
+  const [campaignBrief, setCampaignBrief] = useState('围绕真实家庭周末出行场景，说明空间、补能和日常使用体验，引导用户按自己的路线预约试驾。')
+  const [platforms, setPlatforms] = useState(['朋友圈', '小红书', '抖音口播', '私聊跟进'])
+  const [useAi, setUseAi] = useState(true)
   const [result, setResult] = useState<GenerationResponse | null>(null)
-  const [selectedVariant, setSelectedVariant] = useState<ContentVariant | null>(null)
+  const [activeVariantId, setActiveVariantId] = useState('')
   const [generating, setGenerating] = useState(false)
   const [batching, setBatching] = useState(false)
-  const [batchSummary, setBatchSummary] = useState<Record<string, number> | null>(null)
-  const [leadText, setLeadText] = useState(sampleLeadMessages.join('\n'))
+  const [batchResult, setBatchResult] = useState<{ advisor_count: number; variant_count: number; summary: Record<string, number>; warnings: string[] } | null>(null)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewResult, setReviewResult] = useState<ComplianceResult | null>(null)
+  const [reviewing, setReviewing] = useState(false)
+  const [leadText, setLeadText] = useState(sampleLeads)
   const [leadResult, setLeadResult] = useState<LeadAnalysis | null>(null)
   const [leadLoading, setLeadLoading] = useState(false)
   const [toast, setToast] = useState('')
 
-  useEffect(() => {
-    Promise.all([api.health(), api.bootstrap()])
-      .then(([health, data]) => {
-        setBackendOnline(health.status === 'ok')
-        setBoot(data)
-        if (data.advisors[0]) setSelectedAdvisorId(data.advisors[0].id)
-        if (data.vehicles[0]) setSelectedVehicleId(data.vehicles[0].id)
-      })
-      .catch(() => setBackendOnline(false))
-  }, [])
-
-  useEffect(() => {
-    if (!toast) return
-    const timer = window.setTimeout(() => setToast(''), 2600)
-    return () => window.clearTimeout(timer)
-  }, [toast])
-
   const advisors = boot.advisors.length ? boot.advisors : fallbackAdvisors
   const vehicles = boot.vehicles.length ? boot.vehicles : fallbackVehicles
-  const advisor = advisors.find(item => item.id === selectedAdvisorId) || advisors[0]
-  const vehicle = vehicles.find(item => item.id === selectedVehicleId) || vehicles[0]
-  const title = navItems.find(item => item.id === view)?.label || '业务驾驶舱'
+  const advisor = advisors.find(item => item.id === advisorId) || advisors[0]
+  const vehicle = vehicles.find(item => item.id === vehicleId) || vehicles[0]
+  const activeVariant = result?.variants.find(item => item.id === activeVariantId) || result?.variants[0] || null
+  const providerReady = Boolean(health?.provider.ready)
+  const backendOnline = health?.status === 'ok'
 
-  const metrics = useMemo(() => ({
-    content: boot.metrics.content_generated || 1286,
-    advisors: boot.metrics.advisors_activated || 186,
-    compliance: boot.metrics.compliance_pass_rate || 98.6,
-    leads: boot.metrics.high_intent_leads || 73,
-  }), [boot.metrics])
+  useEffect(() => {
+    refreshConnection()
+  }, [])
 
-  const showToast = (message: string) => setToast(message)
+  async function refreshConnection() {
+    setConnectionError('')
+    try {
+      const [healthData, bootData] = await Promise.all([api.health(), api.bootstrap()])
+      setHealth(healthData)
+      setBoot(bootData)
+      setCampaignName(current => current || bootData.defaults.campaign_name)
+      setCampaignBrief(current => current || bootData.defaults.campaign_brief)
+      if (!currentPlatformSelectionValid(platforms)) setPlatforms(bootData.defaults.platforms)
+      if (bootData.advisors[0] && !bootData.advisors.some(item => item.id === advisorId)) setAdvisorId(bootData.advisors[0].id)
+      if (bootData.vehicles[0] && !bootData.vehicles.some(item => item.id === vehicleId)) setVehicleId(bootData.vehicles[0].id)
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : '后端连接失败')
+      setHealth(null)
+    }
+  }
 
-  const generateContent = async () => {
+  function currentPlatformSelectionValid(items: string[]) {
+    return items.length > 0 && items.every(item => platformOptions.includes(item))
+  }
+
+  function showToast(message: string) {
+    setToast(message)
+    window.setTimeout(() => setToast(''), 2600)
+  }
+
+  function togglePlatform(platform: string) {
+    setPlatforms(current => current.includes(platform) ? current.filter(item => item !== platform) : [...current, platform])
+  }
+
+  async function generate() {
+    if (!backendOnline) return showToast('后端服务还没有连接成功')
+    if (!campaignName.trim() || !campaignBrief.trim() || !platforms.length) return showToast('请把任务信息填写完整')
     setGenerating(true)
     try {
-      const response = await api.generate({
+      const data = await api.generate({
         advisor_id: advisor.id,
         vehicle_id: vehicle.id,
-        campaign_name: campaignName,
-        campaign_brief: campaignBrief,
+        campaign_name: campaignName.trim(),
+        campaign_brief: campaignBrief.trim(),
         platforms,
         objective: '预约试驾',
+        use_llm: useAi,
       })
-      setResult(response)
-      setSelectedVariant(response.variants[0] || null)
-      setView('factory')
-      showToast('内容矩阵已生成并完成合规预检')
+      setResult(data)
+      setActiveVariantId(data.variants[0]?.id || '')
+      setReviewText(data.variants.map(item => `${item.title}\n${item.body}\n${item.call_to_action}`).join('\n\n'))
+      showToast(data.audit.ai_used ? `已由 ${data.audit.provider || 'AI'} 生成并完成预检` : '已生成基础版本并完成预检')
     } catch (error) {
       showToast(error instanceof Error ? error.message : '生成失败')
     } finally {
@@ -176,288 +207,356 @@ function App() {
     }
   }
 
-  const runBatch = async () => {
+  async function runBatch() {
+    if (!backendOnline) return showToast('后端服务还没有连接成功')
     setBatching(true)
     try {
-      const response = await api.batchGenerate({
+      const data = await api.batchGenerate({
         advisor_ids: advisors.map(item => item.id),
         vehicle_id: vehicle.id,
-        campaign_name: campaignName,
-        campaign_brief: campaignBrief,
+        campaign_name: campaignName.trim(),
+        campaign_brief: campaignBrief.trim(),
         platforms: ['朋友圈', '小红书'],
+        use_llm: false,
       })
-      setBatchSummary({ advisor_count: response.advisor_count, variant_count: response.variant_count, ...response.summary })
-      showToast(`已为 ${response.advisor_count} 位顾问生成 ${response.variant_count} 条差异化内容`)
+      setBatchResult({ advisor_count: data.advisor_count, variant_count: data.variant_count, summary: data.summary, warnings: data.warnings })
+      showToast('批量任务已完成，所有内容仍需人工确认')
     } catch (error) {
-      showToast(error instanceof Error ? error.message : '批量任务失败')
+      showToast(error instanceof Error ? error.message : '批量生成失败')
     } finally {
       setBatching(false)
     }
   }
 
-  const analyzeLeads = async () => {
+  async function runReview() {
+    if (!reviewText.trim()) return showToast('先粘贴需要检查的内容')
+    setReviewing(true)
+    try {
+      setReviewResult(await api.compliance({ text: reviewText, has_evidence: Boolean(result?.evidence.length) }))
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '检查失败')
+    } finally {
+      setReviewing(false)
+    }
+  }
+
+  async function analyzeLeads() {
     const messages = leadText.split('\n').map(item => item.trim()).filter(Boolean)
-    if (!messages.length) return
+    if (!messages.length) return showToast('先输入评论或私信')
     setLeadLoading(true)
     try {
-      const response = await api.analyzeLeads(messages)
-      setLeadResult(response)
-      showToast('线索意图识别完成，已形成下一轮选题')
+      setLeadResult(await api.analyzeLeads(messages))
     } catch (error) {
-      showToast(error instanceof Error ? error.message : '线索分析失败')
+      showToast(error instanceof Error ? error.message : '分析失败')
     } finally {
       setLeadLoading(false)
     }
   }
 
-  const startVideo = async () => {
+  async function startVideo() {
     if (!result) return
     try {
-      const response = await api.startVideo({ task_id: result.task_id, video_package: result.video_package, advisor_id: advisor.id })
-      showToast(response.message)
+      const data = await api.startVideo({ task_id: result.task_id, advisor_id: advisor.id, video_package: result.video_package })
+      showToast(data.message)
     } catch (error) {
-      showToast(error instanceof Error ? error.message : '视频任务提交失败')
+      showToast(error instanceof Error ? error.message : '提交失败')
     }
+  }
+
+  function copyVariant(variant: ContentVariant) {
+    const text = `${variant.title}\n\n${variant.body}\n\n${variant.call_to_action}\n\n${variant.hashtags.map(tag => `#${tag}`).join(' ')}`
+    navigator.clipboard?.writeText(text)
+    showToast('内容已复制')
+  }
+
+  function downloadTask() {
+    if (!result) return
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${result.campaign_name}-${result.task_id}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function useTopic(topic: string) {
+    setCampaignName(topic)
+    setCampaignBrief(`围绕“${topic}”给出真实、克制、可核验的解释，并邀请用户按自身需求预约体验。`)
+    setView('create')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">O</div>
-          <div><strong>PersonaFlow</strong><span>乐道购车顾问 AI 内容引擎</span></div>
+          <span className="brand-mark">蔚</span>
+          <div><strong>蔚见</strong><small>购车顾问内容工作台</small></div>
         </div>
-        <div className="competition-tag"><Sparkles size={14} /> 蔚来公司命题专供版</div>
+
         <nav>
-          {navItems.map(item => {
+          {navigation.map(item => {
             const Icon = item.icon
-            return (
-              <button key={item.id} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => setView(item.id)}>
-                <Icon size={19} />
-                <span><strong>{item.label}</strong><small>{item.hint}</small></span>
-                {view === item.id && <ChevronRight size={16} />}
-              </button>
-            )
+            return <button key={item.id} className={cx('nav-item', view === item.id && 'active')} onClick={() => setView(item.id)}>
+              <Icon size={18} />
+              <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+              {view === item.id && <ChevronRight size={15} />}
+            </button>
           })}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="system-status"><span className={backendOnline ? 'status-dot online' : 'status-dot'} /> <div><strong>{backendOnline ? '服务正常' : '演示后端未连接'}</strong><small>{backendOnline ? '事实库与审校引擎在线' : '请启动 backend'}</small></div></div>
-          <div className="disclaimer">比赛原型 · 非乐道官方生产系统<br />仅使用脱敏演示数据</div>
+
+        <div className="sidebar-status">
+          <div className="status-line"><StatusDot online={backendOnline} /><strong>{backendOnline ? '服务已连接' : '服务未连接'}</strong></div>
+          <p>{backendOnline ? (providerReady ? `${health?.provider.label} · ${health?.provider.model}` : '当前使用规则与事实库') : '检查 VITE_API_BASE 或 Render 状态'}</p>
+          <button onClick={refreshConnection}><RefreshCw size={14} />重新检测</button>
         </div>
+        <p className="sidebar-note">学生团队产品原型 · 非官方业务系统</p>
       </aside>
 
-      <main className="main-panel">
+      <main className="main">
         <header className="topbar">
-          <div><span className="eyebrow">ONVO PERSONAFLOW / COMPETITION EDITION</span><h1>{title}</h1></div>
+          <div><h1>{pageTitles[view].title}</h1><p>{pageTitles[view].subtitle}</p></div>
           <div className="topbar-actions">
-            <div className="knowledge-chip"><Database size={15} /><span>车型知识库</span><strong>2026.07.18</strong></div>
-            <button className="icon-button" onClick={() => window.location.reload()} aria-label="刷新"><RefreshCw size={17} /></button>
-            <button className="primary compact" onClick={() => setView('factory')}><Rocket size={16} /> 新建内容任务</button>
+            <div className={cx('connection-chip', backendOnline && 'connected')}><StatusDot online={backendOnline} />{backendOnline ? '接口在线' : '接口离线'}</div>
+            <div className={cx('connection-chip', providerReady && 'connected')}><Bot size={14} />{providerReady ? `${health?.provider.label} 已配置` : '基础模式'}</div>
+            {view !== 'create' && <button className="primary small" onClick={() => setView('create')}><Sparkles size={16} />新建任务</button>}
           </div>
         </header>
 
-        <section className="page-content">
-          {view === 'dashboard' && (
-            <>
-              <section className="hero-grid">
-                <div className="hero-card">
-                  <div className="hero-copy">
-                    <Pill tone="accent"><Zap size={13} /> 一次输入，千人千面</Pill>
-                    <h2>让每位购车顾问，都有自己的<br /><em>AI 内容增长团队</em></h2>
-                    <p>从顾问画像、车型事实、平台内容、品牌审校到评论线索回流，形成可规模复制、可审计、可量化的增长闭环。</p>
-                    <div className="hero-actions"><button className="primary" onClick={() => setView('factory')}><WandSparkles size={17} /> 生成一组内容</button><button className="secondary" onClick={() => setView('batch')}><Boxes size={17} /> 查看规模化能力</button></div>
-                  </div>
-                  <div className="flow-orbit">
-                    <div className="orbit-center"><BrainCircuit size={30} /><strong>PersonaFlow</strong><small>内容增长 Agent</small></div>
-                    <span className="orbit-node n1"><Users size={17} />顾问画像</span>
-                    <span className="orbit-node n2"><BookOpenCheck size={17} />官方事实</span>
-                    <span className="orbit-node n3"><FileVideo2 size={17} />内容生产</span>
-                    <span className="orbit-node n4"><ShieldCheck size={17} />品牌审校</span>
-                    <span className="orbit-node n5"><MessagesSquare size={17} />线索反哺</span>
-                  </div>
-                </div>
-                <div className="challenge-card">
-                  <div className="challenge-head"><span>命题对应度</span><strong>95%</strong></div>
-                  <div className="match-list">
-                    {['购车顾问规模化赋能', '社交内容千人千面', '多平台内容矩阵', '品牌合规与事实核验', '传播效果与线索闭环'].map((item, idx) => <div key={item}><CircleCheckBig size={16} /><span>{item}</span><b>{idx < 4 ? '已实现' : '闭环实现'}</b></div>)}
-                  </div>
-                  <div className="challenge-foot"><BadgeCheck size={16} /> 每项能力均有可操作页面与量化指标</div>
-                </div>
-              </section>
+        {connectionError && <div className="global-alert"><AlertTriangle size={18} /><div><strong>前端没有连到后端</strong><p>{connectionError}</p><small>当前页面仍可查看，但生成、审核和评论分析不可用。</small></div></div>}
 
-              <section className="metric-grid">
-                <MetricCard label="本月生成内容" value={metrics.content.toLocaleString()} suffix="条" icon={WandSparkles} detail="覆盖朋友圈、小红书、短视频与私聊" trend="+32.4%" />
-                <MetricCard label="已激活顾问" value={metrics.advisors} suffix="人" icon={Users} detail="按城市、门店、客群和风格个性化" trend="+24 人" />
-                <MetricCard label="合规一次通过率" value={metrics.compliance} suffix="%" icon={ShieldCheck} detail="事实、极限词与辅助驾驶风险预检" trend="+2.1%" />
-                <MetricCard label="高意向线索" value={metrics.leads} suffix="条" icon={Target} detail="自动识别试驾、价格和空间需求" trend="+18.7%" />
-              </section>
+        <div className="page-body">
+          {view === 'create' && <CreateView
+            advisor={advisor}
+            vehicle={vehicle}
+            advisors={advisors}
+            vehicles={vehicles}
+            advisorId={advisorId}
+            vehicleId={vehicleId}
+            setAdvisorId={setAdvisorId}
+            setVehicleId={setVehicleId}
+            campaignName={campaignName}
+            campaignBrief={campaignBrief}
+            setCampaignName={setCampaignName}
+            setCampaignBrief={setCampaignBrief}
+            platforms={platforms}
+            togglePlatform={togglePlatform}
+            useAi={useAi}
+            setUseAi={setUseAi}
+            providerReady={providerReady}
+            providerLabel={health?.provider.label || 'DeepSeek'}
+            generating={generating}
+            backendOnline={backendOnline}
+            generate={generate}
+            result={result}
+            activeVariant={activeVariant}
+            setActiveVariantId={setActiveVariantId}
+            copyVariant={copyVariant}
+            downloadTask={downloadTask}
+            startVideo={startVideo}
+            dataNotice={boot.data_notice}
+          />}
 
-              <section className="two-column">
-                <div className="panel">
-                  <div className="panel-head"><div><span className="section-kicker">LIVE WORKFLOW</span><h3>一条内容如何形成增长闭环</h3></div><Pill tone="good"><Activity size={13} /> 全链路可追踪</Pill></div>
-                  <div className="workflow-list">
-                    {[
-                      ['01', '理解顾问与本地客群', '读取城市、门店、擅长车型、客户人群和表达偏好', Users],
-                      ['02', '官方知识约束生成', '仅使用已核验车型信息，动态权益与价格强制标注时间', BookOpenCheck],
-                      ['03', '多平台内容差异化', '同一活动生成朋友圈、小红书、短视频口播和私聊版本', WandSparkles],
-                      ['04', '品牌合规与人工放行', '逐项检查夸大宣传、辅助驾驶、价格有效期与事实来源', ShieldCheck],
-                      ['05', '评论私信反哺选题', '识别高意向线索和高频顾虑，自动生成下一轮内容主题', MessagesSquare],
-                    ].map(([num, name, desc, Icon]) => <div className="workflow-row" key={String(num)}><span className="step-num">{String(num)}</span><span className="step-icon"><Icon size={18} /></span><div><strong>{String(name)}</strong><small>{String(desc)}</small></div><ChevronRight size={17} /></div>)}
-                  </div>
-                </div>
-                <div className="panel campaign-panel">
-                  <div className="panel-head"><div><span className="section-kicker">RECENT CAMPAIGNS</span><h3>近期任务效果</h3></div><button className="text-button">查看全部</button></div>
-                  <div className="campaign-list">
-                    {[
-                      ['L80 二孩家庭空间季', '杭州 · 42 位顾问', '168 条', '99.1%', '36 条高意向'],
-                      ['L60 城市通勤种草', '上海 · 36 位顾问', '144 条', '98.4%', '29 条高意向'],
-                      ['L90 三代同堂体验日', '成都 · 28 位顾问', '112 条', '97.8%', '21 条高意向'],
-                    ].map(item => <div className="campaign-item" key={item[0]}><div className="campaign-title"><span className="model-badge">{item[0].slice(0, 3)}</span><div><strong>{item[0]}</strong><small>{item[1]}</small></div></div><div className="campaign-stats"><span><b>{item[2]}</b>内容</span><span><b>{item[3]}</b>合规</span><span><b>{item[4]}</b>线索</span></div></div>)}
-                  </div>
-                </div>
-              </section>
-            </>
-          )}
+          {view === 'advisors' && <AdvisorsView advisors={advisors} selectedId={advisorId} onSelect={id => { setAdvisorId(id); setView('create') }} dataNotice={boot.data_notice} />}
 
-          {view === 'persona' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">PERSONA ENGINE</span><h2>把“同一套话术”变成“每个人的真实表达”</h2><p>顾问画像不是简单标签，而是内容策略、平台结构和客户沟通方式的生成约束。</p></div><button className="primary"><Users size={17} /> 新建顾问画像</button></div>
-              <div className="persona-grid">
-                {advisors.map(item => <article className={item.id === selectedAdvisorId ? 'persona-card selected' : 'persona-card'} key={item.id} onClick={() => setSelectedAdvisorId(item.id)}>
-                  <div className="persona-head"><div className="avatar">{item.name.slice(-1)}</div><div><h3>{item.name}</h3><span><MapPin size={13} />{item.city} · {item.store}</span></div>{item.id === selectedAdvisorId && <span className="selected-check"><Check size={14} /></span>}</div>
-                  <div className="persona-tags"><Pill tone="accent">主推 {item.model_focus}</Pill><Pill>{item.audience}</Pill><Pill>{item.style}</Pill></div>
-                  <div className="persona-data"><div><strong>{item.experience_years}</strong><span>年顾问经验</span></div><div><strong>{item.private_domain_size.toLocaleString()}</strong><span>私域客户</span></div><div><strong>{item.platforms.length}</strong><span>活跃平台</span></div></div>
-                  <div className="platform-row">{item.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
-                </article>)}
-                <article className="persona-card add-card"><div className="add-circle">+</div><strong>导入门店顾问名单</strong><span>支持 CSV 批量创建画像与规则映射</span></article>
-              </div>
-              <section className="panel persona-detail">
-                <div className="panel-head"><div><span className="section-kicker">ACTIVE PERSONA</span><h3>{advisor.name}的内容策略画像</h3></div><Pill tone="good"><BadgeCheck size={13} /> 画像完整度 92%</Pill></div>
-                <div className="strategy-grid">
-                  <div><span>核心客群</span><strong>{advisor.audience}</strong><small>优先使用家庭决策、真实场景和可验证信息</small></div>
-                  <div><span>表达气质</span><strong>{advisor.style}</strong><small>避免模板式营销腔，保留个人语气特征</small></div>
-                  <div><span>内容偏好</span><strong>场景体验 45% · 知识解答 35% · 活动转化 20%</strong><small>根据历史互动与平台表现动态调整</small></div>
-                  <div><span>转化动作</span><strong>优先邀请“到店体验 / 预约试驾”</strong><small>不做高压催单，不使用无法兑现的权益承诺</small></div>
-                </div>
-              </section>
-            </>
-          )}
+          {view === 'batch' && <BatchView advisors={advisors} vehicle={vehicle} vehicles={vehicles} vehicleId={vehicleId} setVehicleId={setVehicleId} campaignName={campaignName} campaignBrief={campaignBrief} setCampaignName={setCampaignName} setCampaignBrief={setCampaignBrief} batching={batching} runBatch={runBatch} batchResult={batchResult} />}
 
-          {view === 'factory' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">AI CONTENT FACTORY</span><h2>一个活动，生成顾问专属内容矩阵</h2><p>内容基于官方车型事实与顾问画像生成，发布前经过规则审校并保留证据链。</p></div><Pill tone={backendOnline ? 'good' : 'warn'}>{backendOnline ? <CircleCheckBig size={13} /> : <CircleAlert size={13} />}{backendOnline ? '生成与审校服务在线' : '请启动后端后生成'}</Pill></div>
-              <div className="factory-layout">
-                <section className="panel config-panel">
-                  <div className="panel-head"><div><span className="step-chip">STEP 1</span><h3>配置内容任务</h3></div></div>
-                  <label className="field"><span>选择顾问</span><select value={selectedAdvisorId} onChange={e => setSelectedAdvisorId(e.target.value)}>{advisors.map(item => <option value={item.id} key={item.id}>{item.name} · {item.city} · {item.style}</option>)}</select></label>
-                  <label className="field"><span>选择车型</span><select value={selectedVehicleId} onChange={e => setSelectedVehicleId(e.target.value)}>{vehicles.map(item => <option value={item.id} key={item.id}>{item.name} · {item.positioning}</option>)}</select></label>
-                  <label className="field"><span>活动名称</span><input value={campaignName} onChange={e => setCampaignName(e.target.value)} /></label>
-                  <label className="field"><span>传播任务</span><textarea rows={4} value={campaignBrief} onChange={e => setCampaignBrief(e.target.value)} /></label>
-                  <div className="field"><span>输出平台</span><div className="choice-grid">{['朋友圈', '小红书', '抖音口播', '视频号口播', '私聊跟进'].map(item => <button className={platforms.includes(item) ? 'choice selected' : 'choice'} key={item} onClick={() => setPlatforms(current => current.includes(item) ? current.filter(value => value !== item) : [...current, item])}>{platforms.includes(item) && <Check size={14} />}{item}</button>)}</div></div>
-                  <div className="knowledge-preview"><BookOpenCheck size={18} /><div><strong>{vehicle.name} 官方事实包</strong><small>{vehicle.positioning} · 整车购买 {vehicle.full_purchase_from} · BaaS {vehicle.baas_from}</small></div><Pill tone="good">已核验</Pill></div>
-                  <button className="primary wide" disabled={generating || !backendOnline || !platforms.length} onClick={generateContent}>{generating ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{generating ? '生成、事实核验与审校中…' : '生成千人千面内容矩阵'}</button>
-                </section>
+          {view === 'review' && <ReviewView text={reviewText} setText={setReviewText} reviewing={reviewing} runReview={runReview} reviewResult={reviewResult} result={result} />}
 
-                <section className="panel result-panel">
-                  <div className="panel-head"><div><span className="step-chip">STEP 2</span><h3>生成结果与证据链</h3></div>{result && <Pill tone={result.compliance.passed ? 'good' : 'warn'}>{result.compliance.passed ? <ShieldCheck size={13} /> : <CircleAlert size={13} />}{result.compliance.passed ? '预检通过' : '需要修改'}</Pill>}</div>
-                  {!result ? <div className="empty-result"><div className="empty-orb"><Bot size={38} /></div><h3>等待创建内容任务</h3><p>生成后将在这里展示多平台内容、短视频分镜、合规结果和车型事实引用。</p><div className="empty-points"><span><Check size={14} />顾问个性化</span><span><Check size={14} />平台差异化</span><span><Check size={14} />事实可追溯</span></div></div> : (
-                    <div className="generated-area">
-                      <div className="variant-tabs">{result.variants.map(item => <button key={item.id} className={selectedVariant?.id === item.id ? 'active' : ''} onClick={() => setSelectedVariant(item)}>{item.platform}</button>)}</div>
-                      {selectedVariant && <div className="content-preview">
-                        <div className="preview-top"><div><Pill tone="accent">{selectedVariant.platform}</Pill><span>由 {selectedVariant.advisor_name} 画像生成</span></div><button className="icon-button" onClick={() => { navigator.clipboard?.writeText(`${selectedVariant.title}\n${selectedVariant.body}`); showToast('已复制内容') }}><ClipboardCheck size={16} /></button></div>
-                        <h3>{selectedVariant.title}</h3><p>{selectedVariant.body}</p><div className="hashtag-row">{selectedVariant.hashtags.map(tag => <span key={tag}>#{tag}</span>)}</div><div className="cta-box"><Target size={16} /><span>{selectedVariant.call_to_action}</span></div>
-                        <div className="mini-scores"><span><strong>{selectedVariant.personalization_score}</strong>个性化</span><span><strong>{selectedVariant.grounding_score}</strong>事实引用</span><span><strong>{selectedVariant.compliance_score}</strong>合规</span></div>
-                      </div>}
-                      <div className="video-package">
-                        <div className="subhead"><div><FileVideo2 size={17} /><strong>短视频生产包</strong></div><button className="secondary compact" onClick={startVideo}><Play size={15} />提交视频任务</button></div>
-                        <div className="shot-strip">{result.video_package.shots.map(shot => <div className="shot-card" key={shot.index}><span>镜头 {shot.index}</span><strong>{shot.duration}s</strong><p>{shot.visual}</p><small>{shot.subtitle}</small></div>)}</div>
-                      </div>
-                      <div className="evidence-box"><div className="subhead"><div><SearchCheck size={17} /><strong>事实依据</strong></div><Pill tone="good">{result.evidence.length} 条引用</Pill></div>{result.evidence.map(item => <div className="evidence-row" key={`${item.field}-${item.value}`}><span>{item.field}</span><strong>{item.value}</strong><a href={item.source_url} target="_blank" rel="noreferrer">{item.source_title}</a><small>{item.verified_at}</small></div>)}</div>
-                    </div>
-                  )}
-                </section>
-              </div>
-            </>
-          )}
+          {view === 'leads' && <LeadsView leadText={leadText} setLeadText={setLeadText} loading={leadLoading} analyze={analyzeLeads} result={leadResult} useTopic={useTopic} />}
 
-          {view === 'batch' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">SCALE ENGINE</span><h2>从“一个人会用”到“上千名顾问稳定使用”</h2><p>总部配置一次活动与规则，系统依据门店、城市、顾问画像批量生成，并进入统一审校队列。</p></div><button className="primary" disabled={batching || !backendOnline} onClick={runBatch}>{batching ? <LoaderCircle className="spin" size={17} /> : <Rocket size={17} />}{batching ? '批量编排中…' : '运行批量演示'}</button></div>
-              <section className="batch-flow">
-                {[
-                  ['总部活动 Brief', '1 份统一事实与目标', ClipboardCheck],
-                  ['顾问画像编排', `${advisors.length} 位演示顾问 / 可扩至千人`, Users],
-                  ['多平台并行生成', '按人、城、店、客群差异化', Boxes],
-                  ['自动合规分流', '通过 / 修改 / 人工升级', ShieldCheck],
-                  ['门店发布与回流', '状态、互动、线索统一回传', Send],
-                ].map(([name, desc, Icon], index) => <div className="batch-node" key={String(name)}><span className="batch-index">0{index + 1}</span><Icon size={23} /><strong>{String(name)}</strong><small>{String(desc)}</small>{index < 4 && <ChevronRight className="batch-arrow" size={20} />}</div>)}
-              </section>
-              <section className="two-column batch-columns">
-                <div className="panel">
-                  <div className="panel-head"><div><span className="section-kicker">BATCH CONFIG</span><h3>本次规模化任务</h3></div><Pill tone="accent">总部策略</Pill></div>
-                  <div className="batch-config-list"><div><span>活动</span><strong>{campaignName}</strong></div><div><span>车型</span><strong>{vehicle.name}</strong></div><div><span>顾问范围</span><strong>{advisors.length} 位 · {new Set(advisors.map(item => item.city)).size} 个城市</strong></div><div><span>输出</span><strong>朋友圈 + 小红书，每人 2 条</strong></div><div><span>发布策略</span><strong>生成后需人工确认，不自动外发</strong></div></div>
-                </div>
-                <div className="panel batch-summary-panel">
-                  <div className="panel-head"><div><span className="section-kicker">RUN RESULT</span><h3>批量任务结果</h3></div>{batchSummary && <Pill tone="good"><CircleCheckBig size={13} />已完成</Pill>}</div>
-                  {!batchSummary ? <div className="compact-empty"><Boxes size={34} /><p>运行演示后，展示批量生成数量、平均个性化与合规表现。</p></div> : <div className="batch-result-grid"><div><strong>{batchSummary.advisor_count}</strong><span>顾问覆盖</span></div><div><strong>{batchSummary.variant_count}</strong><span>内容产出</span></div><div><strong>{batchSummary.avg_personalization || 0}</strong><span>平均个性化</span></div><div><strong>{batchSummary.avg_compliance || 0}</strong><span>平均合规</span></div></div>}
-                </div>
-              </section>
-              <section className="panel queue-panel"><div className="panel-head"><div><span className="section-kicker">REVIEW QUEUE</span><h3>门店内容审校队列</h3></div><div className="legend"><span><i className="green" />可发布</span><span><i className="yellow" />需修改</span><span><i className="red" />人工升级</span></div></div><div className="queue-table"><div className="table-head"><span>顾问 / 门店</span><span>个性化策略</span><span>产出</span><span>合规评分</span><span>状态</span></div>{advisors.map((item, idx) => <div className="table-row" key={item.id}><span><b>{item.name}</b><small>{item.city} · {item.store}</small></span><span>{item.audience} / {item.style}</span><span>2 条</span><span>{98 - idx * 0.6}%</span><span><Pill tone={idx === 2 ? 'warn' : 'good'}>{idx === 2 ? '1 条需修改' : '可发布'}</Pill></span></div>)}</div></section>
-            </>
-          )}
-
-          {view === 'compliance' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">TRUST & COMPLIANCE</span><h2>不是“会写文案”，而是“可被企业放心使用”</h2><p>把事实来源、动态信息、品牌语言和风险规则前置到生成过程，而不是发布后补救。</p></div><Pill tone="good"><ShieldCheck size={13} /> 人工发布闸门默认开启</Pill></div>
-              <div className="compliance-overview">
-                <div className="panel score-panel"><ScoreRing score={result?.compliance.score || 98} label="综合合规分" /><div className="score-copy"><span className="section-kicker">LATEST CHECK</span><h3>{result ? result.campaign_name : '演示内容预检'}</h3><p>事实核验、价格时效、辅助驾驶表述、极限词和转化承诺五类规则全部留痕。</p><div className="score-meta"><span><Clock3 size={14} />最近检查：刚刚</span><span><Database size={14} />知识版本：onvo-cn-2026.07.18</span></div></div></div>
-                <div className="panel rules-panel"><div className="panel-head"><div><span className="section-kicker">RULE COVERAGE</span><h3>规则覆盖</h3></div><Pill tone="accent">5 类 24 条</Pill></div><div className="rule-bars">{[['车型事实准确性', 100], ['价格与权益时效', 96], ['辅助驾驶安全表述', 100], ['品牌语气与极限词', 98], ['隐私与虚假见证', 100]].map(([name, value]) => <div key={String(name)}><span>{String(name)}</span><div><i style={{ width: `${value}%` }} /></div><strong>{value}%</strong></div>)}</div></div>
-              </div>
-              <section className="panel findings-panel"><div className="panel-head"><div><span className="section-kicker">CHECK DETAILS</span><h3>逐项审校结果</h3></div><button className="secondary compact" onClick={() => setView('factory')}><WandSparkles size={15} />生成新内容检查</button></div><div className="finding-list">
-                {[
-                  ['通过', '车型定位与价格来源', `使用 ${vehicle.source_title}，核验日期 ${vehicle.verified_at}；动态权益不做长期承诺。`, 'good'],
-                  ['通过', '辅助驾驶安全边界', '未出现“自动驾驶”“完全不用接管”等误导表达，保留驾驶员持续关注义务。', 'good'],
-                  ['通过', '品牌与广告表达', '未使用“全网第一”“绝对安全”“零风险”等无法证明的绝对化措辞。', 'good'],
-                  ['提醒', '价格时效提示', '涉及起售价时，发布端应附“具体配置、价格与权益以官方最新信息为准”。', 'warn'],
-                  ['通过', '用户见证与隐私', '未虚构车主评价、成交量或个人经历，未输出客户联系方式。', 'good'],
-                ].map(([status, rule, message, tone]) => <div className="finding-row" key={String(rule)}><span className={`finding-icon ${tone}`}>{tone === 'good' ? <Check size={16} /> : <CircleAlert size={16} />}</span><Pill tone={tone === 'good' ? 'good' : 'warn'}>{String(status)}</Pill><div><strong>{String(rule)}</strong><p>{String(message)}</p></div><button className="text-button">查看规则</button></div>)}
-              </div></section>
-              <section className="guardrail-grid">{[
-                ['官方知识优先', '车型参数、价格与品牌表述均绑定来源和核验时间。', BookOpenCheck],
-                ['生成即审校', '不是生成后独立跑一次，而是规则约束贯穿内容生成。', BrainCircuit],
-                ['人机协同放行', '系统给出风险解释与修改建议，最终由顾问或审核员确认。', ClipboardCheck],
-                ['全链路可追责', '任务、画像、知识版本、修改记录和发布状态形成审计日志。', SearchCheck],
-              ].map(([name, desc, Icon]) => <div className="guardrail-card" key={String(name)}><Icon size={22} /><strong>{String(name)}</strong><p>{String(desc)}</p></div>)}</section>
-            </>
-          )}
-
-          {view === 'leads' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">LEAD LOOP</span><h2>让每一次评论和私信，成为下一轮内容输入</h2><p>从互动中识别购车意图、核心顾虑和最佳跟进动作，解决“内容发完就结束”的断点。</p></div><button className="primary" disabled={leadLoading || !backendOnline} onClick={analyzeLeads}>{leadLoading ? <LoaderCircle className="spin" size={17} /> : <BrainCircuit size={17} />}{leadLoading ? '分析中…' : '分析评论与私信'}</button></div>
-              <div className="lead-layout">
-                <section className="panel lead-input"><div className="panel-head"><div><span className="step-chip">INPUT</span><h3>待分析互动</h3></div><Pill>{leadText.split('\n').filter(Boolean).length} 条</Pill></div><textarea value={leadText} onChange={e => setLeadText(e.target.value)} rows={15} /><small>演示数据不会发送到第三方平台，也不会自动联系客户。</small></section>
-                <section className="panel lead-output"><div className="panel-head"><div><span className="step-chip">INSIGHT</span><h3>线索洞察</h3></div>{leadResult && <Pill tone="good"><CircleCheckBig size={13} />已完成</Pill>}</div>{!leadResult ? <div className="empty-result small"><MessageCircleMore size={38} /><h3>等待分析</h3><p>系统将输出意向等级、顾虑主题、建议回复和下一轮选题。</p></div> : <div><div className="intent-cards"><div className="high"><strong>{leadResult.high_intent}</strong><span>高意向</span></div><div className="medium"><strong>{leadResult.medium_intent}</strong><span>中意向</span></div><div className="low"><strong>{leadResult.low_intent}</strong><span>低意向</span></div></div><div className="concern-list"><h4>高频顾虑</h4>{leadResult.top_concerns.map(item => <div key={item.topic}><span>{item.topic}</span><div><i style={{ width: `${Math.min(100, item.count * 28)}%` }} /></div><strong>{item.count}</strong></div>)}</div></div>}</section>
-              </div>
-              {leadResult && <><section className="panel lead-table-panel"><div className="panel-head"><div><span className="section-kicker">ACTION QUEUE</span><h3>线索跟进行动</h3></div><Pill tone="accent">仅生成建议，不自动发送</Pill></div><div className="lead-table"><div className="table-head"><span>原始互动</span><span>意向</span><span>核心顾虑</span><span>下一步</span><span>建议回复</span></div>{leadResult.leads.map(item => <div className="table-row" key={item.id}><span>{item.text}</span><span><Pill tone={item.intent === '高' ? 'good' : item.intent === '中' ? 'accent' : 'neutral'}>{item.intent}意向</Pill></span><span>{item.concern}</span><span>{item.next_action}</span><span>{item.recommended_reply}</span></div>)}</div></section><section className="panel next-topic-panel"><div><span className="section-kicker">CONTENT FEEDBACK</span><h3>由真实顾虑生成下一轮选题</h3></div><div className="topic-cards">{leadResult.next_content_topics.map((topic, idx) => <button key={topic}><span>0{idx + 1}</span><strong>{topic}</strong><ChevronRight size={17} /></button>)}</div></section></>}
-            </>
-          )}
-
-          {view === 'analytics' && (
-            <>
-              <div className="page-intro"><div><span className="section-kicker">MEASUREMENT</span><h2>用企业可验收的指标，证明 AI 不是“炫技”</h2><p>同时衡量效率、个性化、合规、传播和转化，避免只展示生成结果。</p></div><div className="date-filter"><button className="active">近 30 天</button><button>近 90 天</button></div></div>
-              <section className="metric-grid"><MetricCard label="单条平均生产时长" value="3.8" suffix="分钟" icon={Clock3} detail="人工传统流程约 45 分钟" trend="-91.6%" /><MetricCard label="顾问内容差异度" value="86" suffix="分" icon={Users} detail="基于语义、结构与画像命中综合计算" trend="+22 分" /><MetricCard label="事实引用覆盖率" value="100" suffix="%" icon={BookOpenCheck} detail="涉及车型与价格字段均有来源" trend="稳定" /><MetricCard label="互动转线索率" value="12.7" suffix="%" icon={Target} detail="高意向识别后进入顾问跟进队列" trend="+3.4%" /></section>
-              <div className="analytics-grid">
-                <section className="panel chart-panel"><div className="panel-head"><div><span className="section-kicker">EFFICIENCY TREND</span><h3>内容产出与线索增长</h3></div><div className="legend"><span><i className="lime" />内容产出</span><span><i className="blue" />高意向线索</span></div></div><div className="fake-chart"><div className="y-axis"><span>400</span><span>300</span><span>200</span><span>100</span><span>0</span></div><div className="bars">{[[36, 18], [44, 24], [48, 28], [62, 31], [72, 42], [84, 56], [92, 68]].map((pair, idx) => <div className="bar-group" key={idx}><div className="bar lime" style={{ height: `${pair[0]}%` }} /><div className="bar blue" style={{ height: `${pair[1]}%` }} /><span>第{idx + 1}周</span></div>)}</div></div></section>
-                <section className="panel dimension-panel"><div className="panel-head"><div><span className="section-kicker">QUALITY SCORE</span><h3>质量雷达</h3></div></div><div className="dimension-list">{[['画像命中', 91], ['平台适配', 88], ['事实准确', 100], ['品牌合规', 98], ['线索转化', 82]].map(([name, value]) => <div key={String(name)}><span>{String(name)}</span><div><i style={{ width: `${value}%` }} /></div><strong>{value}</strong></div>)}</div><div className="dimension-note"><Gauge size={18} /><p>综合评分由可解释规则计算，每项都能回到具体内容、事实与审校记录。</p></div></section>
-              </div>
-              <section className="panel experiment-panel"><div className="panel-head"><div><span className="section-kicker">A/B EXPERIMENT</span><h3>内容策略实验</h3></div><button className="secondary compact">新建实验</button></div><div className="experiment-table"><div className="table-head"><span>实验</span><span>版本 A</span><span>版本 B</span><span>主要指标</span><span>结论</span></div><div className="table-row"><span><b>L80 空间内容</b><small>杭州 · 小红书</small></span><span>参数解释型</span><span>二孩出行场景型</span><span>收藏 / 私信</span><span><Pill tone="good">B 胜出 +27%</Pill></span></div><div className="table-row"><span><b>L60 通勤内容</b><small>上海 · 朋友圈</small></span><span>产品卖点型</span><span>顾问真实体验型</span><span>咨询 / 试驾</span><span><Pill tone="good">B 胜出 +18%</Pill></span></div></div></section>
-            </>
-          )}
-        </section>
+          {view === 'about' && <AboutView />}
+        </div>
       </main>
-      {toast && <div className="toast"><CircleCheckBig size={17} />{toast}<button onClick={() => setToast('')}><X size={15} /></button></div>}
+
+      {toast && <div className="toast"><CheckCircle2 size={17} /><span>{toast}</span><button onClick={() => setToast('')}><X size={15} /></button></div>}
     </div>
   )
+}
+
+function CreateView(props: {
+  advisor: Advisor
+  vehicle: Vehicle
+  advisors: Advisor[]
+  vehicles: Vehicle[]
+  advisorId: string
+  vehicleId: string
+  setAdvisorId: (value: string) => void
+  setVehicleId: (value: string) => void
+  campaignName: string
+  campaignBrief: string
+  setCampaignName: (value: string) => void
+  setCampaignBrief: (value: string) => void
+  platforms: string[]
+  togglePlatform: (value: string) => void
+  useAi: boolean
+  setUseAi: (value: boolean) => void
+  providerReady: boolean
+  providerLabel: string
+  generating: boolean
+  backendOnline: boolean
+  generate: () => void
+  result: GenerationResponse | null
+  activeVariant: ContentVariant | null
+  setActiveVariantId: (value: string) => void
+  copyVariant: (variant: ContentVariant) => void
+  downloadTask: () => void
+  startVideo: () => void
+  dataNotice: string
+}) {
+  const { advisor, vehicle, result, activeVariant } = props
+  return <>
+    <section className="task-layout">
+      <div className="card task-card">
+        <div className="card-heading"><span className="eyebrow">任务信息</span><h2>今天准备让哪位顾问讲什么？</h2><p>同一份活动信息，会根据顾问所在城市、服务客群和表达习惯生成不同内容。</p></div>
+
+        <div className="form-grid two">
+          <label className="field"><span>购车顾问</span><select value={props.advisorId} onChange={e => props.setAdvisorId(e.target.value)}>{props.advisors.map(item => <option key={item.id} value={item.id}>{item.name} · {item.city} · {item.store}</option>)}</select></label>
+          <label className="field"><span>主推车型</span><select value={props.vehicleId} onChange={e => props.setVehicleId(e.target.value)}>{props.vehicles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.positioning}</option>)}</select></label>
+        </div>
+        <label className="field"><span>任务名称</span><input value={props.campaignName} onChange={e => props.setCampaignName(e.target.value)} placeholder="例如：周末家庭用车体验" /></label>
+        <label className="field"><span>这次具体要讲什么</span><textarea rows={5} value={props.campaignBrief} onChange={e => props.setCampaignBrief(e.target.value)} placeholder="写清目标客群、场景、想回答的问题和希望用户采取的下一步。" /></label>
+        <div className="field"><span>输出平台</span><div className="platform-list">{platformOptions.map(item => <button key={item} className={cx('platform-button', props.platforms.includes(item) && 'selected')} onClick={() => props.togglePlatform(item)}>{props.platforms.includes(item) && <Check size={14} />}{item}</button>)}</div></div>
+
+        <div className="generation-row">
+          <button className={cx('ai-toggle', props.useAi && 'on')} onClick={() => props.setUseAi(!props.useAi)} role="switch" aria-checked={props.useAi}><span /><div><strong>AI 润色</strong><small>{props.providerReady ? `使用 ${props.providerLabel}` : '未配置模型时自动使用基础版本'}</small></div></button>
+          <button className="primary generate-button" disabled={props.generating || !props.backendOnline || !props.platforms.length} onClick={props.generate}>{props.generating ? <LoaderCircle className="spin" size={18} /> : <WandSparkles size={18} />}{props.generating ? '正在生成并检查…' : '生成内容'}</button>
+        </div>
+      </div>
+
+      <aside className="context-column">
+        <div className="card context-card">
+          <div className="context-avatar">{advisor.name.slice(0, 1)}</div>
+          <h3>{advisor.name}</h3><p><MapPin size={14} />{advisor.city} · {advisor.store}</p>
+          <dl><div><dt>主要客群</dt><dd>{advisor.audience}</dd></div><div><dt>表达方式</dt><dd>{advisor.style}</dd></div><div><dt>常用平台</dt><dd>{advisor.platforms.join('、')}</dd></div></dl>
+        </div>
+        <div className="card fact-card">
+          <div className="section-title"><BookOpen size={18} /><div><strong>{vehicle.name} 事实卡</strong><small>核验于 {vehicle.verified_at}</small></div></div>
+          <h3>{vehicle.positioning}</h3>
+          <div className="price-pair"><div><span>整车购买</span><strong>{vehicle.full_purchase_from}</strong></div><div><span>电池租用</span><strong>{vehicle.baas_from}</strong></div></div>
+          <div className="scenario-tags">{vehicle.scenarios.map(item => <span key={item}>{item}</span>)}</div>
+          <a href={vehicle.source_url} target="_blank" rel="noreferrer">查看官方来源 <ArrowRight size={14} /></a>
+        </div>
+        <p className="data-notice"><FileCheck2 size={14} />{props.dataNotice}</p>
+      </aside>
+    </section>
+
+    <section className="result-section">
+      <div className="section-header"><div><span className="eyebrow">生成结果</span><h2>每个平台各写各的，不是简单换标题</h2></div>{result && <div className="section-actions"><Badge tone={result.compliance.passed ? 'good' : 'warn'}><ShieldCheck size={14} />预检 {result.compliance.score} 分</Badge><button className="secondary" onClick={props.downloadTask}><Download size={15} />导出任务</button></div>}</div>
+      {!result ? <div className="card"><Empty icon={Sparkles} title="生成后在这里看结果" text="你会看到多平台文案、官方事实引用、风险检查和短视频分镜。" /></div> : <div className="result-grid">
+        <div className="card content-result">
+          <div className="variant-tabs">{result.variants.map(item => <button key={item.id} className={cx(activeVariant?.id === item.id && 'active')} onClick={() => props.setActiveVariantId(item.id)}>{item.platform}</button>)}</div>
+          {activeVariant && <div className="copy-sheet">
+            <div className="copy-sheet-top"><div><Badge tone="dark">{activeVariant.platform}</Badge><span>{activeVariant.advisor_name} 的版本</span></div><button className="icon-button" onClick={() => props.copyVariant(activeVariant)}><Copy size={16} /></button></div>
+            <h3>{activeVariant.title}</h3>
+            <p>{activeVariant.body}</p>
+            <div className="hashtag-list">{activeVariant.hashtags.map(tag => <span key={tag}>#{tag}</span>)}</div>
+            <div className="cta"><MessageCircle size={16} /><span>{activeVariant.call_to_action}</span></div>
+            <div className="quality-row"><div><span>画像命中</span><strong>{activeVariant.personalization_score}</strong></div><div><span>事实完整</span><strong>{activeVariant.grounding_score}</strong></div><div><span>合规预检</span><strong>{activeVariant.compliance_score}</strong></div></div>
+          </div>}
+        </div>
+
+        <div className="result-side">
+          <div className="card audit-card">
+            <div className="section-title"><Bot size={18} /><div><strong>本次生成方式</strong><small>{new Date(result.audit.generated_at).toLocaleString('zh-CN')}</small></div></div>
+            <div className="audit-provider"><span>{result.audit.ai_used ? result.audit.provider : '规则与事实库'}</span><strong>{result.audit.ai_used ? result.audit.model : '基础版本'}</strong></div>
+            {result.audit.ai_warning && <div className="inline-warning"><AlertTriangle size={15} />{result.audit.ai_warning}</div>}
+            <p><CheckCircle2 size={14} />所有版本都需要顾问确认后再发布。</p>
+          </div>
+          <div className="card evidence-card">
+            <div className="section-title"><BadgeCheck size={18} /><div><strong>引用的官方事实</strong><small>{result.evidence.length} 条</small></div></div>
+            {result.evidence.map(item => <a key={item.field} href={item.source_url} target="_blank" rel="noreferrer"><span>{item.field}</span><strong>{item.value}</strong><small>{item.verified_at}</small></a>)}
+          </div>
+        </div>
+
+        <div className="card video-card full-span">
+          <div className="section-header compact"><div><span className="eyebrow">短视频草稿</span><h3>{result.video_package.hook}</h3></div><button className="secondary" onClick={props.startVideo}><Play size={15} />保存分镜任务</button></div>
+          <div className="shot-list">{result.video_package.shots.map(shot => <article key={shot.index}><span>{String(shot.index).padStart(2, '0')}</span><div><strong>{shot.visual}</strong><p>{shot.subtitle}</p><small>{shot.asset_hint}</small></div><em>{shot.duration}s</em></article>)}</div>
+        </div>
+      </div>}
+    </section>
+  </>
+}
+
+function AdvisorsView({ advisors, selectedId, onSelect, dataNotice }: { advisors: Advisor[]; selectedId: string; onSelect: (id: string) => void; dataNotice: string }) {
+  return <>
+    <div className="intro-card card"><div><span className="eyebrow">画像底座</span><h2>不是给所有顾问发同一份话术</h2><p>系统只保留与内容相关的字段：城市、门店、服务客群、表达方式和常用平台。真实上线时应由顾问本人确认，而不是后台替他猜。</p></div><Badge tone="neutral">当前为脱敏示例</Badge></div>
+    <div className="advisor-grid">{advisors.map(item => <article className={cx('card advisor-card', selectedId === item.id && 'selected')} key={item.id}>
+      <div className="advisor-card-top"><span>{item.name.slice(0, 1)}</span><Badge tone="neutral">{item.city}</Badge></div>
+      <h3>{item.name}</h3><p>{item.store}</p>
+      <dl><div><dt>服务客群</dt><dd>{item.audience}</dd></div><div><dt>表达方式</dt><dd>{item.style}</dd></div><div><dt>重点车型</dt><dd>乐道 {item.model_focus}</dd></div></dl>
+      <div className="platform-tags">{item.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
+      <button className="secondary wide" onClick={() => onSelect(item.id)}>用这个画像新建任务 <ArrowRight size={15} /></button>
+    </article>)}</div>
+    <p className="wide-note"><FileCheck2 size={15} />{dataNotice}</p>
+  </>
+}
+
+function BatchView(props: { advisors: Advisor[]; vehicle: Vehicle; vehicles: Vehicle[]; vehicleId: string; setVehicleId: (id: string) => void; campaignName: string; campaignBrief: string; setCampaignName: (value: string) => void; setCampaignBrief: (value: string) => void; batching: boolean; runBatch: () => void; batchResult: { advisor_count: number; variant_count: number; summary: Record<string, number>; warnings: string[] } | null }) {
+  return <div className="batch-layout">
+    <section className="card batch-config">
+      <div className="card-heading"><span className="eyebrow">总部活动</span><h2>配置一次，按顾问画像分别生成</h2><p>演示只运行三位脱敏顾问，不虚构“上千人已经使用”的经营数据。</p></div>
+      <label className="field"><span>车型</span><select value={props.vehicleId} onChange={e => props.setVehicleId(e.target.value)}>{props.vehicles.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="field"><span>活动名称</span><input value={props.campaignName} onChange={e => props.setCampaignName(e.target.value)} /></label>
+      <label className="field"><span>统一 Brief</span><textarea rows={5} value={props.campaignBrief} onChange={e => props.setCampaignBrief(e.target.value)} /></label>
+      <div className="batch-scope"><span>本次覆盖</span><div>{props.advisors.map(item => <Badge key={item.id} tone="neutral"><UserRound size={13} />{item.name} · {item.city}</Badge>)}</div></div>
+      <button className="primary wide" onClick={props.runBatch} disabled={props.batching}>{props.batching ? <LoaderCircle className="spin" size={17} /> : <Boxes size={17} />}{props.batching ? '正在生成…' : '运行批量任务'}</button>
+    </section>
+
+    <section className="card batch-output">
+      <div className="card-heading"><span className="eyebrow">运行结果</span><h2>生成之后，先审再发</h2><p>批量能力的价值不在于“发得更快”，而在于统一事实、保留差异、可追踪审核。</p></div>
+      {!props.batchResult ? <Empty icon={Boxes} title="还没有运行批量任务" text="运行后展示真实返回数量和审核概况。" /> : <>
+        <div className="batch-numbers"><div><span>顾问</span><strong>{props.batchResult.advisor_count}</strong></div><div><span>内容版本</span><strong>{props.batchResult.variant_count}</strong></div><div><span>平均画像命中</span><strong>{props.batchResult.summary.avg_personalization || 0}</strong></div><div><span>平均合规预检</span><strong>{props.batchResult.summary.avg_compliance || 0}</strong></div></div>
+        <div className="review-rule"><ShieldCheck size={19} /><div><strong>发布闸门保持开启</strong><p>每条内容都需要对应顾问或门店审核，不会自动外发。</p></div></div>
+        {props.batchResult.warnings.length > 0 && <div className="inline-warning"><AlertTriangle size={15} />{props.batchResult.warnings.join('；')}</div>}
+      </>}
+    </section>
+  </div>
+}
+
+function ReviewView({ text, setText, reviewing, runReview, reviewResult, result }: { text: string; setText: (value: string) => void; reviewing: boolean; runReview: () => void; reviewResult: ComplianceResult | null; result: GenerationResponse | null }) {
+  return <div className="review-layout">
+    <section className="card review-input">
+      <div className="card-heading"><span className="eyebrow">内容预检</span><h2>先看风险，再决定是否发布</h2><p>检查绝对化表达、辅助驾驶边界、动态价格时效和事实来源。</p></div>
+      <textarea rows={16} value={text} onChange={e => setText(e.target.value)} placeholder="粘贴朋友圈、小红书、口播或私聊内容…" />
+      <div className="review-actions"><button className="secondary" onClick={() => setText(result?.variants.map(item => `${item.title}\n${item.body}\n${item.call_to_action}`).join('\n\n') || '')}><Clipboard size={15} />载入最近生成内容</button><button className="primary" onClick={runReview} disabled={reviewing}>{reviewing ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}{reviewing ? '检查中…' : '开始检查'}</button></div>
+    </section>
+    <section className="card review-output">
+      {!reviewResult ? <Empty icon={ShieldCheck} title="等待检查" text="结果会说明哪里有问题、为什么有风险，以及应该怎样改。" /> : <>
+        <div className="review-score"><div className={cx('score-circle', reviewResult.passed && 'pass')}><strong>{reviewResult.score}</strong><small>预检分</small></div><div><Badge tone={reviewResult.passed ? 'good' : 'warn'}>{reviewResult.passed ? '未发现阻断项' : '需要修改'}</Badge><h3>{reviewResult.passed ? '可以进入人工确认' : '暂不建议发布'}</h3><p>自动检查不能替代门店与品牌审核。</p></div></div>
+        <div className="finding-list">{reviewResult.findings.map((finding, index) => <article key={`${finding.rule}-${index}`} className={cx(finding.level === 'block' && 'block', finding.level === 'warning' && 'warning')}><span>{finding.level === 'pass' ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}</span><div><strong>{finding.rule}</strong><p>{finding.message}</p><small>建议：{finding.suggestion}</small></div></article>)}</div>
+      </>}
+    </section>
+  </div>
+}
+
+function LeadsView({ leadText, setLeadText, loading, analyze, result, useTopic }: { leadText: string; setLeadText: (value: string) => void; loading: boolean; analyze: () => void; result: LeadAnalysis | null; useTopic: (topic: string) => void }) {
+  return <>
+    <div className="lead-layout">
+      <section className="card lead-input"><div className="card-heading"><span className="eyebrow">评论与私信</span><h2>把客户原话放进来</h2><p>每行一条。真实使用时应先脱敏，不要上传手机号、身份证或完整聊天记录。</p></div><textarea rows={14} value={leadText} onChange={e => setLeadText(e.target.value)} /><button className="primary wide" onClick={analyze} disabled={loading}>{loading ? <LoaderCircle className="spin" size={17} /> : <MessageCircle size={17} />}{loading ? '分析中…' : '分析意向与顾虑'}</button></section>
+      <section className="card lead-summary">{!result ? <Empty icon={MessagesSquare} title="等待分析" text="系统会给出意向等级、主要顾虑、下一步动作和回复建议。" /> : <><div className="intent-grid"><div className="high"><strong>{result.high_intent}</strong><span>高意向</span></div><div><strong>{result.medium_intent}</strong><span>中意向</span></div><div><strong>{result.low_intent}</strong><span>低意向</span></div></div><h3 className="sub-title">大家最关心什么</h3><div className="concern-list">{result.top_concerns.map(item => <div key={item.topic}><span>{item.topic}</span><div><i style={{ width: `${Math.max(16, item.count / Math.max(1, result.total) * 100)}%` }} /></div><strong>{item.count}</strong></div>)}</div></>}</section>
+    </div>
+    {result && <>
+      <section className="card lead-table"><div className="section-header compact"><div><span className="eyebrow">逐条建议</span><h3>顾问下一步应该做什么</h3></div></div>{result.leads.map(item => <article key={item.id}><div><Badge tone={item.intent === '高' ? 'good' : item.intent === '中' ? 'neutral' : 'dark'}>{item.intent}意向</Badge><strong>{item.concern}</strong></div><p>{item.text}</p><div><span>下一步</span><strong>{item.next_action}</strong></div><div><span>建议回复</span><p>{item.recommended_reply}</p></div></article>)}</section>
+      <section className="card topic-section"><div><span className="eyebrow">内容回流</span><h3>这些问题可以直接变成下一轮选题</h3></div><div>{result.next_content_topics.map(topic => <button key={topic} onClick={() => useTopic(topic)}><span>{topic}</span><ArrowRight size={16} /></button>)}</div></section>
+    </>}
+  </>
+}
+
+function AboutView() {
+  const steps = [
+    ['01', '理解顾问', '读取城市、门店、主要客群和表达方式，不依赖空泛的“人设标签”。'],
+    ['02', '绑定事实', '车型定位、价格和动态信息都保留来源与核验日期。'],
+    ['03', '按平台生成', '朋友圈、小红书、口播和私聊分别写，不做机械改写。'],
+    ['04', '发布前审核', '风险表达、辅助驾驶边界和事实来源先检查，再交给人确认。'],
+    ['05', '客户反馈回流', '从评论和私信中识别真实问题，形成下一轮选题。'],
+  ]
+  return <>
+    <section className="card about-hero"><span className="eyebrow">PersonaFlow</span><h2>让内容规模化，但不把顾问变成同一种声音</h2><p>目标不是帮顾问“多发几条文案”，而是降低准备成本、减少事实错误，并让客户反馈真正回到内容计划里。</p><div className="principles"><span><BadgeCheck size={17} />事实可追溯</span><span><Users size={17} />顾问有差异</span><span><ShieldCheck size={17} />发布有人审</span><span><MessageCircle size={17} />反馈能回流</span></div></section>
+    <section className="workflow-list">{steps.map(([number, title, text]) => <article className="card" key={number}><span>{number}</span><div><h3>{title}</h3><p>{text}</p></div><ChevronRight size={18} /></article>)}</section>
+    <section className="about-grid"><div className="card"><div className="section-title"><Gauge size={19} /><div><strong>怎么判断方案有效</strong><small>不展示未经验证的经营大盘</small></div></div><ul><li>同一 Brief 在不同顾问之间的内容差异</li><li>事实引用完整率与风险拦截情况</li><li>顾问从接到任务到完成确认所需时间</li><li>评论问题进入下一轮选题的转化比例</li></ul></div><div className="card"><div className="section-title"><Zap size={19} /><div><strong>真实落地还要补什么</strong><small>原型之外的企业能力</small></div></div><ul><li>企业账号与门店权限体系</li><li>官方知识库的自动同步与版本管理</li><li>真实发布、互动和试驾转化数据回传</li><li>品牌法务规则、审计日志与数据合规</li></ul></div></section>
+  </>
 }
 
 export default App

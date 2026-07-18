@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from hashlib import sha1
 from typing import Any
 from uuid import uuid4
 
@@ -20,10 +19,28 @@ PLATFORM_NAMES = {
 }
 
 
-def _stable_score(seed: str, low: int, high: int) -> int:
-    span = high - low + 1
-    number = int(sha1(seed.encode("utf-8")).hexdigest()[:8], 16)
-    return low + number % span
+def _audience_tokens(audience: str) -> list[str]:
+    return [token for token in audience.replace("、", " ").replace("与", " ").replace("和", " ").split() if len(token) >= 2]
+
+
+def _personalization_score(text: str, advisor: dict[str, Any]) -> int:
+    signals = [
+        advisor["city"] in text,
+        advisor["store"] in text or advisor["name"] in text,
+        any(token in text for token in _audience_tokens(advisor["audience"])),
+        any(word in text for word in ("家庭", "通勤", "孩子", "出行", "试驾")),
+    ]
+    return 60 + sum(10 for matched in signals if matched)
+
+
+def _grounding_score(text: str, vehicle: dict[str, Any]) -> int:
+    signals = [
+        vehicle["name"] in text,
+        vehicle["full_purchase_from"] in text,
+        vehicle["baas_from"] in text,
+        "以乐道官方最新信息为准" in text,
+    ]
+    return 60 + sum(10 for matched in signals if matched)
 
 
 def _style_opening(advisor: dict[str, Any], vehicle: dict[str, Any]) -> str:
@@ -78,7 +95,6 @@ def generate_content(*, advisor: dict[str, Any], vehicle: dict[str, Any], campai
         combined = f"{title}\n{body}\n{cta}"
         combined_texts.append(combined)
         compliance = check_content(combined, has_evidence=True)
-        seed = f"{advisor['id']}-{vehicle['id']}-{platform}-{campaign_name}"
         variants.append({
             "id": f"variant-{index + 1}-{uuid4().hex[:6]}",
             "advisor_id": advisor["id"],
@@ -88,8 +104,8 @@ def generate_content(*, advisor: dict[str, Any], vehicle: dict[str, Any], campai
             "body": body,
             "call_to_action": cta,
             "hashtags": ["乐道汽车", vehicle["name"].replace("乐道 ", ""), advisor["city"] + "看车", "家庭出行"],
-            "personalization_score": _stable_score(seed + "p", 86, 96),
-            "grounding_score": 100,
+            "personalization_score": _personalization_score(combined, advisor),
+            "grounding_score": _grounding_score(combined, vehicle),
             "compliance_score": compliance["score"],
             "status": "ready_for_human_review" if compliance["passed"] else "needs_revision",
         })
@@ -134,6 +150,6 @@ def generate_content(*, advisor: dict[str, Any], vehicle: dict[str, Any], campai
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "knowledge_version": "onvo-cn-2026.07.18",
             "human_review_required": True,
-            "generator_mode": "deterministic-demo-with-video-render-payload",
+            "generator_mode": "rules-with-grounded-facts",
         },
     }
