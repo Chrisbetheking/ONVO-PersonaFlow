@@ -13,16 +13,31 @@ from pydantic import BaseModel, Field
 from .services.compliance import check_content
 from .services.content_engine import generate_content
 from .services.lead_engine import analyze as analyze_leads
-from .services.llm_provider import enhance_result, is_enabled, provider_status
+from .services.llm_provider import enhance_result, is_enabled, provider_status, rewrite_text
 from .services.store import advisors, get_advisor, get_vehicle, vehicles
+from .services.workspace import (
+    add_followup_event,
+    campaigns,
+    decide_review,
+    followups,
+    get_opportunity,
+    opportunities,
+    reset as reset_workspace,
+    reviews,
+    save_draft,
+    submit_review,
+    toggle_memory,
+    update_campaign_run,
+    update_opportunity,
+)
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 KNOWLEDGE_VERSION = "onvo-cn-2026.07.18"
 
 app = FastAPI(
-    title="PersonaFlow API",
+    title="蔚见 API",
     version=APP_VERSION,
-    description="Advisor-personalized, grounded and reviewable social content workspace.",
+    description="购车顾问机会、内容、事实、审核与跟进工作流。",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -41,6 +56,8 @@ class GenerateRequest(BaseModel):
     platforms: list[str] = Field(min_length=1, max_length=6)
     objective: str = "预约试驾"
     use_llm: bool = True
+    opportunity_id: str | None = None
+    customer_context: dict[str, Any] | None = None
 
 
 class BatchGenerateRequest(BaseModel):
@@ -50,6 +67,15 @@ class BatchGenerateRequest(BaseModel):
     campaign_brief: str = Field(min_length=5, max_length=1000)
     platforms: list[str] = Field(min_length=1, max_length=4)
     use_llm: bool = False
+    campaign_id: str | None = None
+
+
+class RewriteRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    instruction: str = Field(min_length=2, max_length=100)
+    advisor_id: str
+    vehicle_id: str
+    customer_context: dict[str, Any] | None = None
 
 
 class ComplianceRequest(BaseModel):
@@ -67,6 +93,48 @@ class VideoRequest(BaseModel):
     video_package: dict[str, Any]
 
 
+class OpportunityStatusRequest(BaseModel):
+    status: str
+
+
+class FollowupEventRequest(BaseModel):
+    type: str = "advisor_note"
+    actor: str = "顾问"
+    title: str = "新增记录"
+    content: str = Field(min_length=1, max_length=5000)
+    status: str = "completed"
+
+
+class MemoryToggleRequest(BaseModel):
+    active: bool
+
+
+class ReviewDecisionRequest(BaseModel):
+    decision: str
+    reason: str = Field(default="", max_length=1000)
+
+
+class DraftRequest(BaseModel):
+    id: str | None = None
+    task_id: str
+    variant_id: str
+    platform: str
+    title: str
+    body: str
+    call_to_action: str
+    status: str = "draft"
+
+
+class ReviewSubmitRequest(DraftRequest):
+    campaign_name: str = "内容任务"
+    advisor_id: str
+    advisor_name: str
+    vehicle_id: str
+    risk_level: str = "low"
+    reason: str = "事实与风险已完成自动预检，等待门店经理确认。"
+    evidence_status: str = "已绑定"
+
+
 def _safe_get_advisor(advisor_id: str) -> dict[str, Any]:
     try:
         return get_advisor(advisor_id)
@@ -81,10 +149,19 @@ def _safe_get_vehicle(vehicle_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=422, detail=str(exc))
+    return HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
+        "mode": "demo-adapter",
         "version": APP_VERSION,
         "knowledge_version": KNOWLEDGE_VERSION,
         "provider": provider_status(),
@@ -97,24 +174,118 @@ def bootstrap() -> dict[str, Any]:
         "advisors": advisors(),
         "vehicles": [{key: value for key, value in item.items() if key != "verified_facts"} for item in vehicles()],
         "defaults": {
-            "campaign_name": "周末家庭用车体验",
-            "campaign_brief": "围绕真实家庭周末出行场景，说明空间、补能和日常使用体验，引导用户按自己的路线预约试驾。",
-            "platforms": ["朋友圈", "小红书", "抖音口播", "私聊跟进"],
+            "campaign_name": "L80 家庭空间体验周",
+            "campaign_brief": "围绕二孩家庭满员乘坐、儿童用品收纳和周末出行，邀请客户携带真实物品到店体验。",
+            "platforms": ["私聊跟进", "朋友圈", "小红书"],
         },
-        "data_notice": "当前为脱敏示例顾问画像；车型事实来自公开官方页面并保留核验日期。",
+        "data_notice": "顾问、客户和活动为脱敏演示数据；车型事实来自公开官方页面并保留核验日期。",
     }
+
+
+@app.get("/api/workspace")
+def workspace_overview() -> dict[str, Any]:
+    return {
+        "opportunities": opportunities(),
+        "followups": followups(),
+        "reviews": reviews(),
+        "campaigns": campaigns(),
+        "data_mode": "demo",
+    }
+
+
+@app.get("/api/opportunities")
+def list_opportunities(include_done: bool = True) -> dict[str, Any]:
+    return {"items": opportunities(include_done=include_done), "data_mode": "demo"}
+
+
+@app.get("/api/opportunities/{opportunity_id}")
+def read_opportunity(opportunity_id: str) -> dict[str, Any]:
+    try:
+        return get_opportunity(opportunity_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.post("/api/opportunities/{opportunity_id}/status")
+def set_opportunity_status(opportunity_id: str, request: OpportunityStatusRequest) -> dict[str, Any]:
+    try:
+        return update_opportunity(opportunity_id, request.status)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.get("/api/followups")
+def list_followups() -> dict[str, Any]:
+    return {"items": followups(), "data_mode": "demo"}
+
+
+@app.post("/api/followups/{customer_id}/events")
+def append_followup_event(customer_id: str, request: FollowupEventRequest) -> dict[str, Any]:
+    try:
+        return add_followup_event(customer_id, request.model_dump())
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.post("/api/followups/{customer_id}/memories/{memory_id}")
+def set_memory_active(customer_id: str, memory_id: str, request: MemoryToggleRequest) -> dict[str, Any]:
+    try:
+        return toggle_memory(customer_id, memory_id, request.active)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.get("/api/reviews")
+def list_reviews() -> dict[str, Any]:
+    return {"items": reviews(), "data_mode": "demo"}
+
+
+@app.post("/api/reviews/{review_id}/decision")
+def review_decision(review_id: str, request: ReviewDecisionRequest) -> dict[str, Any]:
+    try:
+        return decide_review(review_id, request.decision, request.reason)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.get("/api/campaigns")
+def list_campaigns() -> dict[str, Any]:
+    return {"items": campaigns(), "data_mode": "demo"}
+
+
+@app.post("/api/drafts/save")
+def draft_save(request: DraftRequest) -> dict[str, Any]:
+    return save_draft(request.model_dump())
+
+
+@app.post("/api/drafts/submit-review")
+def draft_submit_review(request: ReviewSubmitRequest) -> dict[str, Any]:
+    return submit_review(request.model_dump())
+
+
+@app.post("/api/demo/reset")
+def demo_reset() -> dict[str, Any]:
+    return reset_workspace()
 
 
 @app.post("/api/content/generate")
 async def content_generate(request: GenerateRequest) -> dict[str, Any]:
     advisor = _safe_get_advisor(request.advisor_id)
     vehicle = _safe_get_vehicle(request.vehicle_id)
+    customer_context = request.customer_context
+    if request.opportunity_id and not customer_context:
+        try:
+            customer_context = get_opportunity(request.opportunity_id).get("customer")
+        except KeyError:
+            customer_context = None
     result = generate_content(
         advisor=advisor,
         vehicle=vehicle,
         campaign_name=request.campaign_name,
         campaign_brief=request.campaign_brief,
         platforms=request.platforms,
+        customer_context=customer_context,
+        opportunity_id=request.opportunity_id,
     )
     result["audit"].update({"ai_used": False, "provider": "规则引擎", "model": "grounded-template"})
 
@@ -127,12 +298,29 @@ async def content_generate(request: GenerateRequest) -> dict[str, Any]:
                     vehicle=vehicle,
                     campaign_name=request.campaign_name,
                     campaign_brief=request.campaign_brief,
+                    customer_context=customer_context,
                 )
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-                result["audit"]["ai_warning"] = f"AI 调用失败，已保留可审核的基础版本：{exc}"
+                result["audit"]["ai_warning"] = f"模型调用失败，已保留可审核的基础版本：{exc}"
         else:
             result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
     return result
+
+
+@app.post("/api/content/rewrite")
+async def content_rewrite(request: RewriteRequest) -> dict[str, Any]:
+    advisor = _safe_get_advisor(request.advisor_id)
+    vehicle = _safe_get_vehicle(request.vehicle_id)
+    try:
+        return await rewrite_text(
+            request.text,
+            instruction=request.instruction,
+            advisor=advisor,
+            vehicle=vehicle,
+            customer_context=request.customer_context,
+        )
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"局部改写失败：{exc}") from exc
 
 
 @app.post("/api/content/batch-generate")
@@ -166,6 +354,17 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
         results.append(result)
     personalization_scores = [variant["personalization_score"] for result in results for variant in result["variants"]]
     compliance_scores = [variant["compliance_score"] for result in results for variant in result["variants"]]
+    summary = {
+        "total": sum(len(result["variants"]) for result in results),
+        "ready": sum(1 for result in results for variant in result["variants"] if variant["status"] == "ready_for_human_review"),
+        "pending_review": sum(1 for result in results for variant in result["variants"] if variant["status"] != "ready_for_human_review"),
+        "failed": len(warnings),
+    }
+    if request.campaign_id:
+        try:
+            update_campaign_run(request.campaign_id, summary)
+        except KeyError:
+            warnings.append("活动状态未更新：未找到对应 campaign_id")
     return {
         "batch_id": f"batch-{uuid4().hex[:12]}",
         "advisor_count": len(results),
@@ -173,6 +372,7 @@ async def content_batch_generate(request: BatchGenerateRequest) -> dict[str, Any
         "results": results,
         "warnings": warnings,
         "summary": {
+            **summary,
             "avg_personalization": round(mean(personalization_scores), 1) if personalization_scores else 0,
             "avg_compliance": round(mean(compliance_scores), 1) if compliance_scores else 0,
             "human_review_required": 1,
@@ -209,7 +409,7 @@ async def video_start(request: VideoRequest) -> dict[str, str]:
         "script": request.video_package.get("voiceover", ""),
         "manual_shot_plan": request.video_package.get("shots", []),
         "metadata": {
-            "source": "personaflow",
+            "source": "weijian-workspace",
             "task_id": request.task_id,
             "advisor_id": request.advisor_id,
             "contains_real_customer_data": False,

@@ -1,117 +1,36 @@
-export type Advisor = {
-  id: string
-  name: string
-  city: string
-  store: string
-  model_focus: string
-  audience: string
-  style: string
-  platforms: string[]
-  experience_years: number
-  private_domain_size: number
-}
-
-export type Vehicle = {
-  id: string
-  name: string
-  positioning: string
-  full_purchase_from: string
-  baas_from: string
-  scenarios: string[]
-  source_title: string
-  source_url: string
-  verified_at: string
-}
-
-export type ProviderStatus = {
-  mode: string
-  label: string
-  ready: boolean
-  model: string
-  thinking: string
-}
-
-export type HealthResponse = {
-  status: string
-  version: string
-  knowledge_version: string
-  provider: ProviderStatus
-}
-
-export type ContentVariant = {
-  id: string
-  advisor_id: string
-  advisor_name: string
-  platform: string
-  title: string
-  body: string
-  call_to_action: string
-  hashtags: string[]
-  personalization_score: number
-  grounding_score: number
-  compliance_score: number
-  status: string
-}
-
-export type ComplianceResult = {
-  passed: boolean
-  score: number
-  findings: Array<{ level: string; rule: string; message: string; suggestion: string }>
-}
-
-export type GenerationResponse = {
-  task_id: string
-  campaign_name: string
-  vehicle: Vehicle
-  variants: ContentVariant[]
-  video_package: {
-    hook: string
-    voiceover: string
-    shots: Array<{ index: number; duration: number; visual: string; subtitle: string; asset_hint: string }>
-    cover_titles: string[]
-  }
-  compliance: ComplianceResult
-  evidence: Array<{ field: string; value: string; source_title: string; source_url: string; verified_at: string }>
-  audit: {
-    generated_at: string
-    knowledge_version: string
-    human_review_required: boolean
-    generator_mode: string
-    provider?: string
-    model?: string
-    ai_used?: boolean
-    ai_warning?: string
-  }
-}
-
-export type LeadAnalysis = {
-  total: number
-  high_intent: number
-  medium_intent: number
-  low_intent: number
-  top_concerns: Array<{ topic: string; count: number }>
-  leads: Array<{ id: string; text: string; intent: string; concern: string; next_action: string; recommended_reply: string }>
-  next_content_topics: string[]
-}
-
-export type BootstrapResponse = {
-  advisors: Advisor[]
-  vehicles: Vehicle[]
-  defaults: { campaign_name: string; campaign_brief: string; platforms: string[] }
-  data_notice: string
-}
+import type {
+  BootstrapResponse,
+  Campaign,
+  ComplianceResult,
+  Followup,
+  GenerationResponse,
+  HealthResponse,
+  LeadAnalysis,
+  Opportunity,
+  ReviewItem,
+  WorkspaceResponse,
+} from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+const DEFAULT_TIMEOUT = 30000
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT)
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
       headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
       ...options,
+      signal: controller.signal,
     })
   } catch (error) {
-    throw new Error(`无法连接后端服务。请检查 VITE_API_BASE 和 Render 服务状态。${error instanceof Error ? ` ${error.message}` : ''}`)
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('请求超时。后端可能正在冷启动，请稍后重试。')
+    }
+    throw new Error(`无法连接后端服务。请检查部署地址和服务状态。${error instanceof Error ? ` ${error.message}` : ''}`)
+  } finally {
+    window.clearTimeout(timeout)
   }
   if (!response.ok) {
     const raw = await response.text().catch(() => '')
@@ -127,13 +46,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+const post = <T>(path: string, payload: unknown, timeoutMs?: number) => request<T>(path, {
+  method: 'POST',
+  body: JSON.stringify(payload),
+  timeoutMs,
+})
+
 export const api = {
   baseUrl: API_BASE,
   health: () => request<HealthResponse>('/api/health'),
   bootstrap: () => request<BootstrapResponse>('/api/bootstrap'),
-  generate: (payload: Record<string, unknown>) => request<GenerationResponse>('/api/content/generate', { method: 'POST', body: JSON.stringify(payload) }),
-  batchGenerate: (payload: Record<string, unknown>) => request<{ batch_id: string; advisor_count: number; variant_count: number; results: GenerationResponse[]; warnings: string[]; summary: Record<string, number> }>('/api/content/batch-generate', { method: 'POST', body: JSON.stringify(payload) }),
-  compliance: (payload: Record<string, unknown>) => request<ComplianceResult>('/api/compliance/check', { method: 'POST', body: JSON.stringify(payload) }),
-  analyzeLeads: (messages: string[]) => request<LeadAnalysis>('/api/leads/analyze', { method: 'POST', body: JSON.stringify({ messages }) }),
-  startVideo: (payload: Record<string, unknown>) => request<{ job_id: string; status: string; mode: string; message: string }>('/api/video/start', { method: 'POST', body: JSON.stringify(payload) }),
+  workspace: () => request<WorkspaceResponse>('/api/workspace'),
+  opportunities: () => request<{ items: Opportunity[]; data_mode: string }>('/api/opportunities'),
+  updateOpportunity: (id: string, status: Opportunity['status']) => post<Opportunity>(`/api/opportunities/${id}/status`, { status }),
+  generate: (payload: Record<string, unknown>) => post<GenerationResponse>('/api/content/generate', payload, 90000),
+  rewrite: (payload: Record<string, unknown>) => post<{ text: string; provider: string; ai_used: boolean }>('/api/content/rewrite', payload, 90000),
+  batchGenerate: (payload: Record<string, unknown>) => post<{ batch_id: string; advisor_count: number; variant_count: number; results: GenerationResponse[]; warnings: string[]; summary: Record<string, number> }>('/api/content/batch-generate', payload, 120000),
+  compliance: (payload: Record<string, unknown>) => post<ComplianceResult>('/api/compliance/check', payload),
+  analyzeLeads: (messages: string[]) => post<LeadAnalysis>('/api/leads/analyze', { messages }),
+  followups: () => request<{ items: Followup[]; data_mode: string }>('/api/followups'),
+  addFollowupEvent: (customerId: string, payload: Record<string, unknown>) => post<Followup>(`/api/followups/${customerId}/events`, payload),
+  toggleMemory: (customerId: string, memoryId: string, active: boolean) => post(`/api/followups/${customerId}/memories/${memoryId}`, { active }),
+  reviews: () => request<{ items: ReviewItem[]; data_mode: string }>('/api/reviews'),
+  decideReview: (id: string, decision: 'approved' | 'returned', reason: string) => post<ReviewItem>(`/api/reviews/${id}/decision`, { decision, reason }),
+  campaigns: () => request<{ items: Campaign[]; data_mode: string }>('/api/campaigns'),
+  saveDraft: (payload: Record<string, unknown>) => post('/api/drafts/save', payload),
+  submitReview: (payload: Record<string, unknown>) => post<ReviewItem>('/api/drafts/submit-review', payload),
+  startVideo: (payload: Record<string, unknown>) => post<{ job_id: string; status: string; mode: string; message: string }>('/api/video/start', payload, 90000),
+  resetDemo: () => post<WorkspaceResponse>('/api/demo/reset', {}),
 }
