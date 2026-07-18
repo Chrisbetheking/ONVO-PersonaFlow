@@ -1,0 +1,38 @@
+[
+  {
+    "id": "advisor-sh-01",
+    "name": "林悦",
+    "city": "上海",
+    "store": "上海浦东体验店",
+    "model_focus": "L60",
+    "audience": "年轻三口之家",
+    "style": "理性亲和",
+    "platforms": ["小红书", "朋友圈", "抖音"],
+    "experience_years": 4,
+    "private_domain_size": 1680
+  },
+  {
+    "id": "advisor-hz-02",
+    "name": "周辰",
+    "city": "杭州",
+    "store": "杭州城西体验店",
+    "model_focus": "L80",
+    "audience": "重视空间的二孩家庭",
+    "style": "场景叙事",
+    "platforms": ["朋友圈", "视频号", "私聊"],
+    "experience_years": 6,
+    "private_domain_size": 2360
+  },
+  {
+    "id": "advisor-cd-03",
+    "name": "顾安",
+    "city": "成都",
+    "store": "成都高新体验店",
+    "model_focus": "L90",
+    "audience": "多人出行与三代同堂家庭",
+    "style": "专业稳重",
+    "platforms": ["抖音", "小红书", "朋友圈"],
+    "experience_years": 5,
+    "private_domain_size": 1940
+  }
+]

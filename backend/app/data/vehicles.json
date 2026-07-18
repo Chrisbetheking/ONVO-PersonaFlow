@@ -1,0 +1,55 @@
+[
+  {
+    "id": "l60",
+    "name": "乐道 L60",
+    "positioning": "中型 SUV 科技旗舰",
+    "full_purchase_from": "19.28 万元起",
+    "baas_from": "13.58 万元起",
+    "scenarios": ["城市通勤", "年轻三口之家", "周末郊游"],
+    "verified_facts": [
+      "新乐道 L60 定位中型 SUV 科技旗舰",
+      "整车购买 19.28 万元起",
+      "电池租用方式购买 13.58 万元起",
+      "官方页面展示预约试驾入口"
+    ],
+    "source_title": "乐道 L60 官方产品页",
+    "source_url": "https://www.onvo.cn/l60",
+    "verified_at": "2026-07-18"
+  },
+  {
+    "id": "l80",
+    "name": "乐道 L80",
+    "positioning": "智能双舱大五座旗舰 SUV",
+    "full_purchase_from": "24.28 万元起",
+    "baas_from": "15.68 万元起",
+    "scenarios": ["二孩家庭", "大五座空间", "长途出行"],
+    "verified_facts": [
+      "乐道 L80 定位智能双舱大五座旗舰 SUV",
+      "整车购买 24.28 万元起",
+      "电池租用方式购买 15.68 万元起",
+      "官方页面列出 240L 智能电动前备舱",
+      "官方页面列出 1,200L 常规后备舱储物空间"
+    ],
+    "source_title": "乐道 L80 官方产品页",
+    "source_url": "https://www.onvo.cn/l80",
+    "verified_at": "2026-07-18"
+  },
+  {
+    "id": "l90",
+    "name": "乐道 L90",
+    "positioning": "智能大空间旗舰 SUV",
+    "full_purchase_from": "26.58 万元起",
+    "baas_from": "17.98 万元起",
+    "scenarios": ["三代同堂", "多人出行", "家庭大三排"],
+    "verified_facts": [
+      "乐道 L90 定位智能大空间旗舰 SUV",
+      "整车购买 26.58 万元起",
+      "电池租用方式购买 17.98 万元起",
+      "官方页面表述为家庭大三排 SUV",
+      "官方页面展示 6 人 10 箱出行场景"
+    ],
+    "source_title": "乐道 L90 官方产品页",
+    "source_url": "https://www.onvo.cn/l90",
+    "verified_at": "2026-07-18"
+  }
+]
