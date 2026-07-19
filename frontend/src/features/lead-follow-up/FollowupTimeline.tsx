@@ -15,7 +15,8 @@ export function FollowupTimeline({ events, selectedId = '', onSelect, renderActi
     <ol className="timeline">
       {events.map(event => {
         const Icon = iconMap[event.type] || UserRound
-        return <li key={event.id} className={selectedId === event.id ? 'active' : ''} data-testid={`timeline-event-${event.id}`}>
+        const toneClass = event.type === 'customer_message' ? 'timeline-customer' : event.type === 'advisor_note' || event.type === 'advisor_sent' ? 'timeline-advisor' : 'timeline-system'
+        return <li key={event.id} className={`${toneClass} ${selectedId === event.id ? 'active' : ''}`} data-testid={`timeline-event-${event.id}`}>
           <span className="timeline-icon"><Icon size={17} /></span>
           <div className="timeline-body">
             <button className="timeline-main" onClick={() => onSelect?.(event)}>
@@ -23,7 +24,7 @@ export function FollowupTimeline({ events, selectedId = '', onSelect, renderActi
               <p>{event.content}</p>
               <small>{event.actor}{event.source_label ? ` · ${event.source_label}` : ''}{event.sync_status ? ` · ${event.sync_status}` : ''}</small>
             </button>
-            {renderActions ? <div className="timeline-event-actions">{renderActions(event)}</div> : null}
+            {renderActions ? <div className="timeline-actions">{renderActions(event)}</div> : null}
           </div>
         </li>
       })}

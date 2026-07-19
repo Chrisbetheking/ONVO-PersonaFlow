@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CheckCircle2, ChevronRight, Film, LoaderCircle, MessageCircleReply, Sparkles, UserRound, UsersRound } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronRight, Film, LoaderCircle, MessageCircleReply, PanelRightClose, PanelRightOpen, Sparkles, UserRound, UsersRound } from 'lucide-react'
 import { api } from '../api'
 import { useApp } from '../app/AppContext'
 import { navigate } from '../app/router'
 import { ContentEditor } from '../features/content-generation/ContentEditor'
 import { EvidencePanel } from '../features/evidence-trace/EvidencePanel'
 import { RiskPanel } from '../features/inline-compliance/RiskPanel'
-import { Button, EmptyState, ErrorState, StatusPill } from '../shared/ui'
+import { Button, DemoBadge, EmptyState, ErrorState, StatusPill, Tabs } from '../shared/ui'
 import type { ContentVariant, Opportunity, RiskAnnotation } from '../types'
 
 export function StudioPage({ params }: { params: URLSearchParams }) {
@@ -44,6 +44,8 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
   const [activeRiskId, setActiveRiskId] = useState('')
   const [showVideo, setShowVideo] = useState(false)
   const [error, setError] = useState('')
+  const [trustCollapsed, setTrustCollapsed] = useState(false)
+  const [trustTab, setTrustTab] = useState<'evidence'|'risk'>('evidence')
 
   const opportunity = workspace.opportunities.find(item => item.id === opportunityId) || defaultOpportunity
   const advisor = boot.advisors.find(item => item.id === opportunity?.advisor_id) || boot.advisors[0]
@@ -264,21 +266,21 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
             <p className="eyebrow">沟通准备</p>
             <h2>先把这次机会的上下文带进内容，再决定发什么</h2>
             <p>系统会同时生成私聊、朋友圈和小红书版本。客户身份只用于一对一内容，公开平台不会泄露客户信息。</p>
-            <div className="start-checklist"><span><CheckCircle2 size={17} />已读取顾问表达习惯</span><span><CheckCircle2 size={17} />已关联车型官方事实</span><span><CheckCircle2 size={17} />已带入客户顾虑与最近消息</span></div>
+            <div className="start-checklist"><span><CheckCircle2 size={17} />已读取顾问表达习惯</span><span><CheckCircle2 size={17} />已关联车型官方事实</span><span><CheckCircle2 size={17} />已带入客户顾虑与最近消息</span></div><div className="generation-preview" aria-label="将生成的平台版本"><article><strong>私聊跟进</strong><p>围绕客户原问题，给出可继续对话的下一步。</p></article><article><strong>朋友圈</strong><p>使用匿名家庭场景，不暴露客户身份。</p></article><article><strong>小红书</strong><p>以场景和可核验事实组织公开内容。</p></article></div>
             {error ? <ErrorState description={error} /> : null}
             <Button data-testid="generate-content" loading={generating} onClick={() => void startGeneration()}><Sparkles size={17} />生成沟通方案</Button>
             <small>模型不可用时会自动保留有明确标记的规则兜底版本，不会伪装成模型结果。</small>
           </div>
         </div>
       ) : activeVariant && generation ? (
-        <div className="studio-grid">
+        <div className={trustCollapsed ? "studio-grid right-rail-collapsed" : "studio-grid"}>
           <aside className="context-panel">
             <ContextDetails opportunity={opportunity!} advisor={advisor!} vehicle={vehicle!} campaignName={generation.campaign_name} />
             <div className="persona-explain"><div className="panel-title"><UserRound size={17} /><strong>为什么这样写</strong></div>{activeVariant.personalization_reasons.map(reason => <p key={reason}>{reason}</p>)}</div>
           </aside>
 
           <div className="content-column">
-            <div className="platform-tabs" role="tablist">{variants.map(item => <button data-testid={`platform-tab-${item.platform}`} role="tab" aria-selected={activeVariant.id === item.id} className={activeVariant.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveVariantId(item.id)}>{item.platform}<span>{item.version > 1 ? `v${item.version}` : ''}</span></button>)}</div>
+            <div className="platform-tabs" role="tablist">{variants.map(item => <button data-testid={`platform-tab-${item.platform}`} role="tab" aria-selected={activeVariant.id === item.id} className={activeVariant.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveVariantId(item.id)}>{item.platform}<span>{item.version > 1 ? `v${item.version}` : ''}</span></button>)}<button className="platform-rail-toggle" aria-label={trustCollapsed ? '展开事实与合规侧栏' : '收起事实与合规侧栏'} onClick={() => setTrustCollapsed(v => !v)}>{trustCollapsed?<PanelRightOpen size={17}/>:<PanelRightClose size={17}/>}</button></div>
             {generation.audit.ai_warning ? <div className="model-warning">{generation.audit.ai_warning}</div> : null}
             <ContentEditor
               variant={activeVariant}
@@ -289,8 +291,8 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
               saving={saving}
               submitting={submitting}
               onChange={updateVariant}
-              onSelectEvidence={id => { setActiveEvidenceId(id); document.getElementById(`evidence-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
-              onSelectRisk={id => { setActiveRiskId(id); document.getElementById(`risk-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
+              onSelectEvidence={id => { setTrustTab('evidence'); setActiveEvidenceId(id); document.getElementById(`evidence-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
+              onSelectRisk={id => { setTrustTab('risk'); setActiveRiskId(id); document.getElementById(`risk-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}
               onSave={() => void save()}
               onSubmit={() => void submit()}
               onUndo={() => applyHistory(-1)}
@@ -308,10 +310,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
             {showVideo ? <VideoPackage generation={generation} advisorId={advisor!.id} onStart={startVideo} /> : null}
           </div>
 
-          <aside className="trust-panel">
-            <section><div className="panel-title"><strong>事实依据</strong><span>{generation.evidence.length} 条</span></div><EvidencePanel evidence={generation.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} verificationStatus={activeVariant.verification_status} /></section>
-            <section><div className="panel-title"><strong>风险与发布检查</strong><span>{activeVariant.risk_annotations.length} 项</span></div><RiskPanel risks={activeVariant.risk_annotations} activeId={activeRiskId} onSelect={setActiveRiskId} onApplySuggestion={applyRiskSuggestion} /></section>
-          </aside>
+          <aside className="trust-panel" aria-label="事实与合规侧栏"><div className="trust-overview"><div><strong>{activeVariant.verification_status === 'verified' ? '已核验' : '待重新核验'}</strong><small>总体核验状态</small></div><div><strong>{activeVariant.risk_annotations.length}</strong><small>风险与提醒</small></div><div><strong>{generation.evidence.length}/{Math.max(activeVariant.claims.length,1)}</strong><small>证据覆盖</small></div></div><Tabs label="事实与风险" value={trustTab} onChange={value=>setTrustTab(value as 'evidence'|'risk')} items={[{value:'evidence',label:'事实依据',count:generation.evidence.length},{value:'risk',label:'风险检查',count:activeVariant.risk_annotations.length}]}/>{trustTab==='evidence'?<section><div className="panel-title"><strong>事实依据</strong><DemoBadge>{activeVariant.verification_status==='verified'?'当前有效':'上次核验结果'}</DemoBadge></div><EvidencePanel evidence={generation.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} verificationStatus={activeVariant.verification_status}/></section>:<section><div className="panel-title"><strong>风险与发布检查</strong><span>{activeVariant.risk_annotations.length} 项</span></div><RiskPanel risks={activeVariant.risk_annotations} activeId={activeRiskId} onSelect={setActiveRiskId} onApplySuggestion={applyRiskSuggestion}/></section>}</aside>
         </div>
       ) : <div className="loading-stage"><LoaderCircle className="spin" />正在准备内容工作区</div>}
     </section>

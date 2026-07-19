@@ -1,75 +1,62 @@
-# RELEASE_INTEGRITY_REPORT｜v0.4.1
+# RELEASE_INTEGRITY_REPORT｜v0.4.2
 
-## 基线与范围
+## 基线与修改边界
 
-- 唯一基线：`ONVO-PersonaFlow-v0.4.0-DIRECT-UPLOAD.zip`
+- 唯一基线：本轮上传的 `ONVO-PersonaFlow-main(1).zip`；
 - 未重新创建项目；
 - 未更换 React、TypeScript、Vite 或 FastAPI；
-- 未删除现有顾问空间和 v0.4.0 企业模块；
-- 本轮新增 2 个文件，修改 44 个文件，删除 0 个文件。
+- 未新增业务范围，后端业务源码未修改；
+- 保留顾问、门店经理和总部运营三个空间；
+- 交付包仅包含本轮新增或修改文件，不包含完整仓库、依赖或构建产物。
 
 ## 自动一致性检查
 
-`scripts/release_integrity.py` 已更新并检查：
+`scripts/release_integrity.py` 检查：
 
-- `frontend/package.json` 与 `package-lock.json` 均为 `0.4.1`；
-- API 全部携带 `X-Workspace-Id`；
-- 试驾预约未写死顾问；
-- 顾问画像调用真实更新 API；
-- 审核页使用完整正文并支持重新核验；
-- `PolicyPage` 与全部企业页面存在；
-- 内容失效、证据警告和服务端重新核验路由存在；
-- 客户承诺由服务端根据客户档案确认负责顾问；
-- README 引用的本地 Markdown 文件全部存在；
-- CI 执行 compileall、pytest、npm ci、typecheck、unit、Playwright、audit、build 和 release integrity；
-- CI 在失败时上传 Playwright 报告与测试结果；
-- E2E 使用的 65 个 literal `data-testid` 均可在源码中解析；
-- PATCH_MANIFEST 与 ZIP 文件列表可进行严格一一校验。
+- `frontend/package.json` 与 `package-lock.json` 版本为 `0.4.2`；
+- UI Token、v0.4.2 一致性样式和共享组件存在；
+- `ui:review` 截图命令存在；
+- Workspace Header、真实顾问预约、顾问画像保存、完整审核与重新核验能力仍存在；
+- 企业页面和原有服务端重新核验接口未丢失；
+- README 本地 Markdown 链接均存在；
+- CI 继续执行后端、前端、Playwright、审计、构建和发布检查；
+- E2E literal `data-testid` 可在源码中找到；
+- 提供 Manifest 与 ZIP 时，两者文件列表严格一致。
 
-## 双工作区验证
-
-### 最终工作区
+## 验证摘要
 
 ```text
-backend pytest        20 passed
-frontend unit tests   14 passed
-Playwright E2E        15/15 passed
-npm audit             0 vulnerabilities
-production build      passed
-release integrity     PASSED
+backend compileall       passed
+backend pytest           20 passed
+frontend npm ci          61 packages
+frontend typecheck       passed
+frontend unit tests      14 passed
+Playwright E2E           19/19 passed
+UI screenshot review     1/1 passed, 11 screenshots
+npm audit                0 vulnerabilities
+production build         passed
+release integrity        PASSED
 ```
 
-### 干净基线覆盖后
+## UI/UX 一致性
 
-```text
-backend pytest        20 passed
-frontend unit tests   14 passed
-Playwright E2E        15/15 passed
-npm audit             0 vulnerabilities
-production build      passed
-release integrity     PASSED
-```
-
-## P0 状态一致性
-
-正文、标题、CTA、局部改写和风险建议修改共用同一失效机制。失效后：
-
-```text
-claim              stale
-evidence           needs_revalidation
-compliance         needs_revalidation
-submit / send      blocked
-manager approve    blocked after manager edit
-```
-
-重新核验成功后才生成新的签名凭证并恢复“已核验”。
-
-## Demo / 真实边界
-
-真实运行的是当前 workspace 内的状态机、签名核验、审计、知识版本、影响、承诺、质量复核、辅导、案例和隔离。
-
-Feishu、CRM、Messaging 和 Trends 仍为明确标记的 Demo Adapter。真实企业应用、生产权限、真实客户和真实业务提升结论均未伪造。
+- 使用统一设计 Token 和共享 Button、IconButton、StatusBadge、Tabs、ActionMenu、Dialog、StickyCommandBar；
+- 主工作台采用内部滚动，关键工具栏和命令栏保持可见；
+- 同一状态只保留一个主要 CTA，次要动作进入菜单；
+- Demo 工具与业务操作分离；
+- 1366 宽度下无页面级横向溢出；
+- 状态同时使用中文文本和颜色，不仅依赖颜色；
+- stale 与绿色“已核验”不会同时出现。
 
 ## 环境限制
 
-`npx playwright install --with-deps chromium` 已执行，但当前沙箱 DNS 无法解析 Debian 软件源。最终和干净基线 E2E 均使用环境内 Chromium 完成。CI 中保留正式 Playwright Chromium 安装步骤。
+`npx playwright install --with-deps chromium` 已执行，但当前沙箱无法解析 Debian 软件源并最终超时。E2E 和截图验收使用环境内 Chromium 完成；GitHub Actions 仍保留标准 Chromium 安装步骤。
+
+## 文件统计
+
+```text
+新增：17
+修改：20
+删除：0
+替换包文件：37
+```

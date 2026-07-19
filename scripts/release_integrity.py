@@ -30,6 +30,8 @@ REQUIRED_DOCS = [
     "DEPLOY_CHECKLIST.md",
     "DESIGN_REFERENCE_MATRIX.md",
     "RELEASE_INTEGRITY_REPORT.md",
+    "DESIGN_SYSTEM.md",
+    "UI_REVIEW.md",
 ]
 
 REQUIRED_PAGES = [
@@ -84,10 +86,18 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
 
     package = json.loads(read(root, "frontend/package.json"))
     lock = json.loads(read(root, "frontend/package-lock.json"))
-    require(package.get("version") == "0.4.1", "frontend/package.json version must be 0.4.1")
-    require(lock.get("version") == "0.4.1", "package-lock top version must be 0.4.1")
-    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.1", "package-lock root version must be 0.4.1")
-    passed.append("frontend version is 0.4.1")
+    require(package.get("version") == "0.4.2", "frontend/package.json version must be 0.4.2")
+    require(lock.get("version") == "0.4.2", "package-lock top version must be 0.4.2")
+    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.2", "package-lock root version must be 0.4.2")
+    passed.append("frontend version is 0.4.2")
+
+    require((root / "frontend/src/styles/tokens.css").is_file(), "missing UI design tokens")
+    require((root / "frontend/src/styles/v042.css").is_file(), "missing v0.4.2 UI consistency layer")
+    shared_ui = read(root, "frontend/src/shared/ui/index.tsx")
+    for component in ["IconButton", "StatusBadge", "Tabs", "ActionMenu", "StickyCommandBar", "ConfirmDialog", "LoadingSkeleton"]:
+        require(f"function {component}" in shared_ui or f"const {component}" in shared_ui, f"missing shared UI component: {component}")
+    require(package.get("scripts", {}).get("ui:review"), "frontend package missing ui:review screenshot command")
+    passed.append("v0.4.2 design system, shared UI and screenshot command exist")
 
     api = read(root, "frontend/src/api.ts")
     require("X-Workspace-Id" in api, "api.ts must send X-Workspace-Id")

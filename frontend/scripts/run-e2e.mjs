@@ -16,6 +16,10 @@ const tests = [
   '优秀案例由经理确认后发布',
   '角色空间与演示场景状态刷新后保留且 workspace 隔离',
   '主要企业操作按钮产生状态变化或保持明确禁用',
+  'UI 工作台在 1366 宽度无水平溢出且右栏可折叠',
+  '中文状态与主要操作遵循统一 UI 规则',
+  '内容失效后状态视觉同步且重新核验恢复',
+  '刷新后保留当前会话和客户档案对象',
 ]
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -41,4 +45,4 @@ for (const [index, name] of tests.entries()) {
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
-console.log('\n[E2E] All 15 scenarios passed.')
+console.log(`\n[E2E] All ${tests.length} scenarios passed.`)

@@ -34,7 +34,7 @@ function RoutedApp() {
   switch (route.id) {
     case 'studio': page = <StudioPage params={route.params} />; break
     case 'followup': page = <FollowUpPage params={route.params} />; break
-    case 'customers': page = <Customer360Page />; break
+    case 'customers': page = <Customer360Page params={route.params} />; break
     case 'promises': page = <PromisesPage />; break
     case 'review': page = <ReviewPage params={route.params} />; break
     case 'manager-radar': page = <RadarPage mode="manager" />; break

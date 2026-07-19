@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarCheck2, Clock3, MapPin, MessageCirclePlus, Save, Sparkles, UserRound } from 'lucide-react'
+import { CalendarCheck2, Clock3, MapPin, MessageCirclePlus, PanelRightClose, PanelRightOpen, Save, Sparkles, UserRound } from 'lucide-react'
 import { api } from '../api'
 import { useApp } from '../app/AppContext'
 import { FollowupTimeline } from '../features/lead-follow-up/FollowupTimeline'
-import { Button, Dialog, EmptyState, ErrorState, StatusPill } from '../shared/ui'
+import { ActionMenu, Button, DemoBadge, Dialog, EmptyState, ErrorState, StatusPill } from '../shared/ui'
 import type { FollowupEvent, LeadAnalysis } from '../types'
 
 const channelOptions = [
@@ -29,6 +29,7 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
   const [bookingNotes, setBookingNotes] = useState('按满员状态体验装载和周末出行路线。')
   const [booking, setBooking] = useState(false)
   const [error, setError] = useState('')
+  const [contextCollapsed, setContextCollapsed] = useState(false)
   const followup = workspace.followups.find(item => item.customer_id === customerId) || workspace.followups[0]
   const advisor = boot.advisors.find(item => item.id === followup?.advisor_id)
   const vehicle = boot.vehicles.find(item => item.id === followup?.vehicle_id)
@@ -105,17 +106,17 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
   }
 
   return (
-    <section className="followup-page conversation-workbench">
+    <section className={contextCollapsed ? "followup-page conversation-workbench right-rail-collapsed" : "followup-page conversation-workbench"}>
       <aside className="conversation-list" aria-label="客户会话列表">
         <div className="conversation-list-heading"><strong>客户沟通</strong><span>{workspace.followups.length}</span></div>
-        {workspace.followups.map(item => { const itemAdvisor = boot.advisors.find(a => a.id === item.advisor_id); const last = item.events[item.events.length - 1]; return <button data-testid={`customer-row-${item.customer_id}`} key={item.customer_id} className={item.customer_id === followup.customer_id ? 'conversation-row active' : 'conversation-row'} onClick={() => setCustomerId(item.customer_id)}><span className="avatar">{item.customer_name.slice(0, 1)}</span><span><strong>{item.customer_name}</strong><small>{last?.content || item.next_action}</small><em>{itemAdvisor?.name || '未分配'} · {item.stage}</em></span></button> })}
+        {workspace.followups.map(item => { const itemAdvisor = boot.advisors.find(a => a.id === item.advisor_id); const last = item.events[item.events.length - 1]; return <button data-testid={`customer-row-${item.customer_id}`} key={item.customer_id} className={item.customer_id === followup.customer_id ? 'conversation-row active' : 'conversation-row'} onClick={() => { setCustomerId(item.customer_id); window.location.hash = `/followup?customer=${item.customer_id}` }}><span className="avatar">{item.customer_name.slice(0, 1)}</span><span><strong>{item.customer_name}</strong><small>{last?.content || item.next_action}</small><em>{itemAdvisor?.name || '未分配'} · {item.stage}</em></span></button> })}
       </aside>
 
       <section className="conversation-thread">
-        <header className="conversation-header"><div><p className="eyebrow">{vehicle?.name || '客户沟通'}</p><h2>{followup.customer_name}</h2><p><UserRound size={14}/>{advisor?.name || '未找到顾问'} · {advisor?.store || '未分配门店'}</p></div><div><StatusPill tone="info">{followup.stage}</StatusPill><Button data-testid="open-booking" onClick={() => setBookingOpen(true)}><CalendarCheck2 size={16}/>预约试驾</Button></div></header>
+        <header className="conversation-header"><div><p className="eyebrow">{vehicle?.name || '客户沟通'}</p><h2>{followup.customer_name}</h2><p><UserRound size={14}/>{advisor?.name || '未找到顾问'} · {advisor?.store || '未分配门店'}</p></div><div><StatusPill tone="info">{followup.stage}</StatusPill><DemoBadge>{dataMode === 'live' ? '业务记录' : '授权沟通 Demo'}</DemoBadge><button className="header-rail-toggle" aria-label={contextCollapsed ? '展开客户上下文' : '收起客户上下文'} title={contextCollapsed ? '展开客户上下文' : '收起客户上下文'} onClick={() => setContextCollapsed(value => !value)}>{contextCollapsed ? <PanelRightOpen size={17}/> : <PanelRightClose size={17}/>}</button><Button data-testid="open-booking" onClick={() => setBookingOpen(true)}><CalendarCheck2 size={16}/>预约试驾</Button></div></header>
         <div className="conversation-channel-filter" data-testid="conversation-channel-filter">{channelOptions.map(([value, label]) => <button key={value} className={channel === value ? 'active' : ''} onClick={() => setChannel(value)}>{label}</button>)}</div>
         {error ? <ErrorState description={error}/> : null}
-        <div className="conversation-scroll" data-testid="conversation-timeline"><FollowupTimeline events={filteredEvents} selectedId={selectedEvent?.id} onSelect={setSelectedEvent} renderActions={event => <><button onClick={() => void convertEvent(event, 'memory')}>转记忆</button><button onClick={() => void convertEvent(event, 'concern')}>转顾虑</button><button data-testid={`event-to-promise-${event.id}`} onClick={() => void convertEvent(event, 'promise')}>转承诺</button><button onClick={() => void convertEvent(event, 'next_action')}>转下一行动</button><button onClick={() => void convertEvent(event, 'manager_help')}>请经理协助</button></>} /></div>
+        <div className="conversation-scroll" data-testid="conversation-timeline"><FollowupTimeline events={filteredEvents} selectedId={selectedEvent?.id} onSelect={setSelectedEvent} renderActions={event => <><button data-testid={`event-to-promise-${event.id}`} className="message-primary-action" onClick={() => void convertEvent(event, 'promise')}>转为承诺</button><ActionMenu label="更多消息操作" align="left"><button role="menuitem" onClick={() => void convertEvent(event, 'memory')}>转为客户记忆</button><button role="menuitem" onClick={() => void convertEvent(event, 'concern')}>记录为顾虑</button><button role="menuitem" onClick={() => void convertEvent(event, 'next_action')}>创建下一行动</button><button role="menuitem" onClick={() => void convertEvent(event, 'manager_help')}>请求经理协助</button></ActionMenu></>} /></div>
         {selectedEvent ? <div className="event-source-drawer" data-testid="event-source-detail"><strong>原始来源</strong><p>{selectedEvent.source_label || '系统事件'}</p><small>{selectedEvent.sync_status || '未标记同步状态'} · {selectedEvent.time}</small></div> : null}
         <div className="reply-composer">
           <div className="composer-heading"><MessageCirclePlus size={18}/><strong>{composerMode === 'customer' ? '人工补录客户回复' : '记录顾问发送 Demo'}</strong><div><button className={composerMode === 'customer' ? 'active' : ''} onClick={() => setComposerMode('customer')}>客户回复</button><button className={composerMode === 'advisor' ? 'active' : ''} onClick={() => setComposerMode('advisor')}>顾问发送</button></div></div>

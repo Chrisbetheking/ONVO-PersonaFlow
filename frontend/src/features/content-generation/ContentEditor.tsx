@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Check, Clipboard, Copy, Download, RotateCcw, Save, Send, Undo2, Redo2, WandSparkles, ShieldCheck } from 'lucide-react'
 import type { ContentVariant, Evidence, RiskAnnotation } from '../../types'
 import { annotateText, canSubmitVariant } from '../../shared/workflow'
-import { Button, StatusPill } from '../../shared/ui'
+import { ActionMenu, Button, StatusPill, StickyCommandBar } from '../../shared/ui'
 
 export function ContentEditor({
   variant,
@@ -96,10 +96,7 @@ export function ContentEditor({
         <p>{segments.map((segment, index) => segment.type === 'plain' ? <span key={index}>{segment.text}</span> : <button data-testid={`content-mark-${segment.type}`} key={index} className={`inline-mark inline-${segment.type}`} onClick={() => segment.type === 'claim' ? onSelectEvidence(segment.refId || '') : onSelectRisk(segment.refId || '')}>{segment.text}</button>)}</p>
       </div>
 
-      <div className="editor-actions">
-        <Button variant="ghost" onClick={onRegenerate}><RotateCcw size={16} />重新生成此版本</Button>
-        <div><Button data-testid="save-draft" variant="secondary" loading={saving} onClick={onSave}><Save size={16} />保存草稿</Button><Button data-testid="submit-review" loading={submitting} disabled={!canSubmit} onClick={onSubmit}><Send size={16} />提交审核</Button></div>
-      </div>
+      <StickyCommandBar><div className="command-status"><StatusPill tone={verified ? 'success' : 'warning'}>{verified ? '当前版本已核验' : '待重新核验'}</StatusPill>{!canSubmit ? <span>{!verified ? '重新核验后才能提交' : '请先处理阻断项'}</span> : null}</div><div className="command-actions"><ActionMenu label="更多内容操作"><button role="menuitem" onClick={onRegenerate}><RotateCcw size={15}/>重新生成此版本</button><button role="menuitem" onClick={() => void copyText()}><Copy size={15}/>复制全文</button><button role="menuitem" onClick={downloadText}><Download size={15}/>导出文本</button></ActionMenu><Button data-testid="save-draft" variant="secondary" loading={saving} onClick={onSave}><Save size={16}/>保存草稿</Button><Button data-testid="submit-review" loading={submitting} disabled={!canSubmit} onClick={onSubmit}><Send size={16}/>提交审核</Button></div></StickyCommandBar>
       {!canSubmit ? <div className="submission-hint"><Check size={15} /><span>{!verified ? '内容修改后必须重新核验事实与合规。' : blocking ? '存在阻断风险，修改后才能提交。' : !variant.claims.length ? '至少需要绑定一条事实依据。' : '正文内容过短，暂不适合提交。'}</span></div> : null}
     </div>
   )
