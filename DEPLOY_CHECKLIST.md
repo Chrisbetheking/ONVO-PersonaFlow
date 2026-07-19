@@ -1,45 +1,113 @@
 # 部署检查清单
 
-## 包管理器与版本
+## 1. 包管理器和版本
 
-- 前端：npm，锁文件 `frontend/package-lock.json`。
+- 前端：npm，唯一 lock 文件为 `frontend/package-lock.json`。
 - Node.js：22.x。
 - Python：3.12。
-- 前端版本：0.3.1。
+- 前端版本：0.4.0。
 
-## Render 后端
+## 2. 本地覆盖后验证
 
-- Root Directory：`backend`
-- Build Command：`pip install -r requirements.txt`
-- Start Command：`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Health Check：`/api/health`
-- 环境变量：`CORS_ORIGINS`、可选 DeepSeek 配置、可选视频服务配置。
-- 不将 API Key 写入 GitHub 或 Vercel。
+```bash
+python3 -m compileall -q backend/app
+cd backend && PYTHONPATH=. python3 -m pytest -q
+cd ../frontend
+npm ci
+npm run typecheck
+npm test
+npx playwright install --with-deps chromium
+npm run test:e2e
+npm audit --audit-level=moderate
+npm run build
+cd ..
+python3 scripts/release_integrity.py
+```
 
-## Vercel 前端
+## 3. Render
 
-- Framework：Vite
-- Root Directory：`frontend`
-- Install Command：`npm ci`
-- Build Command：`npm run build`
-- Output Directory：`dist`
-- 环境变量：`VITE_API_BASE=https://<render-host>`
-- `frontend/vercel.json` 保持 SPA 重写。
+```text
+Root Directory: backend
+Build Command: pip install -r requirements.txt
+Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Health Check: /api/health
+```
 
-## GitHub Actions
+环境变量至少设置：
 
-CI 应依次执行：后端安装和 pytest、前端 npm ci、typecheck、unit tests、Playwright Chromium 安装、E2E、audit、build、release integrity。Playwright 失败时上传 `playwright-report` 和 `test-results`；截图、trace 和失败视频包含在 `test-results` 中。
+```env
+CORS_ORIGINS=https://你的-vercel-域名
+LLM_PROVIDER_MODE=demo
+INTEGRATION_MODE=demo
+```
 
-## 上线后检查
+接入 DeepSeek 或企业系统时，密钥只放 Render Secret。
 
-1. `/api/health` 返回版本 0.3.1。
-2. 两个无痕浏览器的机会、审核和跟进状态互不影响。
-3. 重置演示只影响当前浏览器。
-4. Vercel 页面刷新后 Hash 路由保持。
-5. DeepSeek 未配置时内容明确标记规则兜底。
-6. 视频服务未配置时不显示成片已生成。
-7. 运行 `python3 scripts/release_integrity.py`。
+部署后检查：
 
-## 回滚
+- `/api/health` 返回 0.4.0；
+- `/api/bootstrap` 和 `/api/enterprise` 接受 `X-Workspace-Id`；
+- 不同 workspace 状态隔离；
+- 当前 workspace reset 不影响其他会话。
 
-在覆盖补丁前创建 Git 分支或 Tag。出现部署异常时回滚到上一个成功提交，并保留 Render 和 Vercel 的上一部署记录。
+## 4. Vercel
+
+```text
+Framework: Vite
+Root Directory: frontend
+Install: npm ci
+Build: npm run build
+Output: dist
+Node: 22.x
+```
+
+环境变量：
+
+```env
+VITE_API_BASE=https://你的-render-地址
+```
+
+检查：
+
+- 刷新 hash 路由不丢失；
+- Network 中请求带 `X-Workspace-Id`；
+- 角色空间和 Demo 标签正常；
+- 后端失败时明确切换本地演示。
+
+## 5. GitHub Actions
+
+CI 必须依次执行后端编译/测试、前端安装、类型检查、单测、Playwright 安装/E2E、audit、build 和 release integrity。Playwright 失败时上传：
+
+```text
+frontend/playwright-report
+frontend/test-results
+```
+
+## 6. Secret 检查
+
+不得提交：
+
+- `.env`；
+- DeepSeek、飞书、CRM、消息、趋势或视频密钥；
+- 真实客户或员工数据；
+- 生产 Webhook 签名；
+- Playwright 报告、截图或 trace 中的敏感内容。
+
+## 7. 演示验收
+
+- 五个场景均可重置当前 workspace；
+- 知识变更产生版本和影响；
+- 内容编辑后提交禁用；
+- 重新核验后可提交；
+- 经理编辑后再次需要核验；
+- 承诺可提醒和完成；
+- 员工说明和经理辅导均留痕；
+- 双浏览器会话隔离。
+
+## 8. 回滚
+
+1. 在 GitHub 保留部署前 commit/tag；
+2. Render 和 Vercel 回滚到同一 commit；
+3. 不只回滚前端或后端；
+4. 若生产 Adapter 异常，先将 `INTEGRATION_MODE=demo` 或关闭对应连接器；
+5. 检查知识版本和审计记录后再恢复。

@@ -1,4 +1,5 @@
 import type { BootstrapResponse, WorkspaceResponse } from '../types'
+import { fallbackEnterprise } from './enterpriseDemo'
 
 export const fallbackBootstrap: BootstrapResponse = {
   advisors: [
@@ -28,6 +29,7 @@ const reviewBody = '想象一个周六早晨：两个孩子、露营车和全家
 
 export const fallbackWorkspace: WorkspaceResponse = {
   data_mode: 'demo',
+  enterprise: fallbackEnterprise,
   opportunities: [
     {
       id: 'opp-chen-l80', kind: 'customer', priority: 'high', status: 'pending', title: '陈女士 · L80 家庭空间咨询', source: '微信私聊',
@@ -63,7 +65,7 @@ export const fallbackWorkspace: WorkspaceResponse = {
       id: 'review-l80-001', task_id: 'task-l80-001', variant_id: 'variant-review-l80', title: 'L80 家庭体验活动 · 朋友圈', content_title: '满员以后，怎么判断空间是否适合自己', advisor_id: 'advisor-hz-02', advisor_name: '周辰', vehicle_id: 'l80', platform: '朋友圈', status: 'pending', risk_level: 'medium', reason: '内容引用动态价格，发布前需再次确认官方页面。', body: reviewBody, call_to_action: '欢迎携带儿童推车和常用行李预约家庭场景试驾。',
       claims: [{ id: 'claim-review-l80', text: '乐道 L80 定位为智能双舱大五座旗舰 SUV，当前官方页面显示整车购买 24.28 万元起。', evidence_id: 'evidence-positioning', field: '车型定位与价格' }],
       risk_annotations: [{ id: 'risk-review-l80', text: '乐道 L80 定位为智能双舱大五座旗舰 SUV，当前官方页面显示整车购买 24.28 万元起。', level: 'info', rule: '动态事实复核', reason: '价格可能随时间和地区变化，发布前应再次核验。', suggestion: '乐道 L80 定位为智能双舱大五座旗舰 SUV，具体价格与权益以发布当天官方页面为准。' }],
-      evidence: l80Evidence, reviewed_body: reviewBody, reviewed_call_to_action: '欢迎携带儿童推车和常用行李预约家庭场景试驾。', evidence_status: '已绑定 · 本地演示', submitted_at: '今天 10:16', decision_reason: '', change_log: [],
+      evidence: l80Evidence, reviewed_body: reviewBody, reviewed_call_to_action: '欢迎携带儿童推车和常用行李预约家庭场景试驾。', evidence_status: '已绑定 · 本地演示', verification_status: 'verified', compliance_status: 'verified', knowledge_version: 'demo-2026.07', verification_version: 1, verified_at: '2026-07-18T10:16:00', version_history: [{ type: 'generated', at: '2026-07-18T10:16:00' }], submitted_at: '今天 10:16', decision_reason: '', change_log: [],
     },
   ],
   campaigns: [

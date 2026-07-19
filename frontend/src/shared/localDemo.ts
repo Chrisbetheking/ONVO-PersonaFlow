@@ -58,6 +58,12 @@ export function createLocalGeneration({
       claims: [{ id: `local-claim-${index}`, text: claimText, evidence_id: 'evidence-positioning', field: '车型定位与价格' }],
       risk_annotations: [{ id: `local-risk-${index}`, text: riskText, level: 'info', rule: '动态事实复核', reason: '价格可能随时间和地区变化，发布前需要再次核验。', suggestion: '具体配置、价格与权益以发布当天官方页面为准。' }],
       version: 1,
+      verification_status: 'verified',
+      compliance_status: 'verified',
+      knowledge_version: 'local-demo-2026.07.19',
+      verification_version: 1,
+      verified_at: new Date().toISOString(),
+      version_history: [{ type: 'generated', at: new Date().toISOString(), version: 1 }],
     }
   })
   return {
@@ -117,6 +123,12 @@ export function createLocalReview(generation: GenerationResponse, variant: Conte
     submitted_at: '刚刚',
     decision_reason: '',
     change_log: [],
+    verification_status: variant.verification_status,
+    compliance_status: variant.compliance_status,
+    knowledge_version: variant.knowledge_version,
+    verification_version: variant.verification_version,
+    verified_at: variant.verified_at,
+    version_history: variant.version_history,
   }
 }
 

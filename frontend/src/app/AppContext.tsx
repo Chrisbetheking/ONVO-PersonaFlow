@@ -18,8 +18,11 @@ import type {
   HealthResponse,
   Opportunity,
   ReviewItem,
+  RoleSpace,
+  RevalidationResponse,
   VideoJobState,
   WorkspaceResponse,
+  EnterpriseWorkspace,
 } from '../types'
 
 const GENERATION_KEY = `weijian:last-generation:${api.workspaceId}`
@@ -62,7 +65,11 @@ type AppContextValue = {
   submitCampaignTaskReview: (campaignId: string, taskId: string) => Promise<ReviewItem>
   updateAdvisor: (id: string, patch: Pick<Advisor, 'audience' | 'style'>) => Promise<Advisor>
   startVideo: (payload: Record<string, unknown>) => Promise<VideoJobState>
+  switchRole: (role: RoleSpace) => Promise<void>
+  revalidateVariant: (variant: ContentVariant) => Promise<RevalidationResponse>
+  revalidateReview: (reviewId: string, changes?: { body: string; call_to_action: string; risk_annotations: ReviewItem['risk_annotations'] }) => Promise<ReviewItem>
   resetDemo: () => Promise<void>
+  updateEnterpriseLocal: (updater: (current: EnterpriseWorkspace) => EnterpriseWorkspace) => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -253,6 +260,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         risk_annotations: variant.risk_annotations,
         evidence: generation.evidence,
         status: 'draft',
+        verification_status: variant.verification_status,
+        compliance_status: variant.compliance_status,
+        knowledge_version: variant.knowledge_version,
+        verification_version: variant.verification_version,
+        verified_at: variant.verified_at,
+        version_history: variant.version_history,
       })
     }
     showToast(usingFallback ? '已保存到当前浏览器的本地演示工作区' : '草稿已保存')
@@ -260,6 +273,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function submitVariant(variant: ContentVariant) {
     if (!generation) throw new Error('当前没有可提交的内容任务')
+    if (variant.verification_status !== 'verified') throw new Error('内容已发生变化，请重新核验后再提交审核')
     const advisor = boot.advisors.find(item => item.id === variant.advisor_id)
     const result = usingFallback
       ? createLocalReview(generation, variant)
@@ -281,6 +295,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         risk_level: variant.risk_annotations.some(item => item.level === 'block') ? 'high' : variant.risk_annotations.length ? 'medium' : 'low',
         reason: variant.risk_annotations[0]?.reason || '事实依据已绑定，等待门店经理确认。',
         evidence_status: generation.evidence.length ? '已绑定' : '缺少事实',
+        verification_status: variant.verification_status,
+        compliance_status: variant.compliance_status,
+        knowledge_version: variant.knowledge_version,
+        verification_version: variant.verification_version,
+        verified_at: variant.verified_at,
+        version_history: variant.version_history,
         store: advisor?.store,
       })
     if (usingFallback) setWorkspace(current => ({ ...current, reviews: [result, ...current.reviews] }))
@@ -314,8 +334,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   async function decideReviewAction(id: string, decision: 'approved' | 'returned', reason: string, body: string, callToAction: string, riskAnnotations: ReviewItem['risk_annotations']) {
     const existing = workspace.reviews.find(item => item.id === id)
     if (!existing) throw new Error('未找到审核任务')
+    const contentChanged = body !== existing.reviewed_body || callToAction !== existing.reviewed_call_to_action || JSON.stringify(riskAnnotations) !== JSON.stringify(existing.risk_annotations)
+    if (decision === 'approved' && (existing.verification_status !== 'verified' || contentChanged)) throw new Error('经理修改后的内容必须重新核验，不能直接批准')
     const updated = usingFallback
-      ? { ...existing, status: decision, decision_reason: reason, reviewed_body: body, reviewed_call_to_action: callToAction, risk_annotations: riskAnnotations, decision_at: new Date().toISOString(), change_log: [...(existing.change_log || []), { at: new Date().toISOString(), decision, reason, body_changed: body !== existing.reviewed_body, cta_changed: callToAction !== existing.reviewed_call_to_action }] }
+      ? { ...existing, status: decision, decision_reason: reason, reviewed_body: body, reviewed_call_to_action: callToAction, risk_annotations: riskAnnotations, decision_at: new Date().toISOString(), verification_status: contentChanged ? 'needs_revalidation' : existing.verification_status, compliance_status: contentChanged ? 'needs_revalidation' : existing.compliance_status, evidence_status: contentChanged ? '需要重新核验' : existing.evidence_status, change_log: [...(existing.change_log || []), { at: new Date().toISOString(), decision, reason, body_changed: body !== existing.reviewed_body, cta_changed: callToAction !== existing.reviewed_call_to_action }] }
       : await api.decideReview(id, decision, reason, body, callToAction, riskAnnotations)
     setWorkspace(current => ({ ...current, reviews: current.reviews.map(item => item.id === id ? updated : item) }))
     showToast(decision === 'approved' ? '内容已批准' : '已退回顾问修改')
@@ -414,6 +436,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return api.startVideo(payload)
   }
 
+  async function switchRoleAction(role: RoleSpace) {
+    if (usingFallback) {
+      setWorkspace(current => ({ ...current, enterprise: { ...current.enterprise, enterprise_meta: { ...current.enterprise.enterprise_meta, current_role: role, updated_at: new Date().toISOString() } } }))
+    } else {
+      await api.switchRole(role, workspace.enterprise.enterprise_meta.current_actor_id)
+      await refreshWorkspace()
+    }
+    showToast(`已切换到${role === 'advisor' ? '顾问空间' : role === 'manager' ? '门店经理空间' : '总部运营空间'}`)
+  }
+
+  async function revalidateVariantAction(variant: ContentVariant): Promise<RevalidationResponse> {
+    if (!generation) throw new Error('当前没有可重新核验的内容')
+    const response = usingFallback
+      ? {
+          variant: { ...variant, verification_status: 'verified', compliance_status: 'verified', verification_version: variant.verification_version + 1, verified_at: new Date().toISOString(), version: variant.version + 1, version_history: [...variant.version_history, { type: 'local_revalidated', at: new Date().toISOString() }] },
+          evidence: generation.evidence,
+          compliance: generation.compliance,
+          verification: { status: 'verified', at: new Date().toISOString(), knowledge_version: variant.knowledge_version, method: '本地规则演示' },
+        } as RevalidationResponse
+      : await api.revalidateContent({
+          task_id: generation.task_id,
+          variant_id: variant.id,
+          advisor_id: variant.advisor_id,
+          vehicle_id: generation.vehicle.id,
+          platform: variant.platform,
+          title: variant.title,
+          body: variant.body,
+          call_to_action: variant.call_to_action,
+          version: variant.verification_version,
+        })
+    setGeneration({ ...generation, variants: generation.variants.map(item => item.id === variant.id ? response.variant : item), evidence: response.evidence, compliance: response.compliance })
+    showToast('事实与合规已重新核验')
+    return response
+  }
+
+  async function revalidateReviewAction(reviewId: string, changes?: { body: string; call_to_action: string; risk_annotations: ReviewItem['risk_annotations'] }) {
+    const existing = workspace.reviews.find(item => item.id === reviewId)
+    if (!existing) throw new Error('未找到审核任务')
+    const updated = usingFallback
+      ? { ...existing, reviewed_body: changes?.body ?? existing.reviewed_body, reviewed_call_to_action: changes?.call_to_action ?? existing.reviewed_call_to_action, risk_annotations: changes?.risk_annotations ?? existing.risk_annotations, verification_status: 'verified', compliance_status: 'verified', evidence_status: '已重新核验 · 本地演示', verification_version: existing.verification_version + 1, verified_at: new Date().toISOString(), version_history: [...existing.version_history, { type: 'manager_revalidated', at: new Date().toISOString() }] }
+      : await api.revalidateReview(reviewId, changes || {})
+    setWorkspace(current => ({ ...current, reviews: current.reviews.map(item => item.id === reviewId ? updated : item) }))
+    showToast('经理修改后的内容已重新核验')
+    return updated
+  }
+
+
+  function updateEnterpriseLocal(updater: (current: EnterpriseWorkspace) => EnterpriseWorkspace) {
+    setWorkspace(current => ({ ...current, enterprise: updater(current.enterprise) }))
+  }
+
   async function resetDemo() {
     if (!usingFallback) {
       const reset = await api.resetDemo()
@@ -464,7 +537,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     submitCampaignTaskReview,
     updateAdvisor: updateAdvisorAction,
     startVideo,
+    switchRole: switchRoleAction,
+    revalidateVariant: revalidateVariantAction,
+    revalidateReview: revalidateReviewAction,
     resetDemo,
+    updateEnterpriseLocal,
   }), [boot, health, workspace, generation, loading, refreshing, connectionError, dataMode, toast, usingFallback])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

@@ -23,6 +23,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
     updateOpportunityStatus,
     showToast,
     startVideo,
+    revalidateVariant,
   } = useApp()
   const requestedId = params.get('opportunity')
   const defaultOpportunity = workspace.opportunities.find(item => item.id === requestedId)
@@ -34,6 +35,7 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [rewriting, setRewriting] = useState(false)
+  const [revalidating, setRevalidating] = useState(false)
   const [activeVariantId, setActiveVariantId] = useState(generation?.variants[0]?.id || '')
   const [variants, setVariants] = useState<ContentVariant[]>(generation?.variants || [])
   const [histories, setHistories] = useState<Record<string, ContentVariant[]>>({})
@@ -89,7 +91,18 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
 
   function updateVariant(patch: Partial<Pick<ContentVariant, 'title' | 'body' | 'call_to_action' | 'risk_annotations'>>) {
     if (!activeVariant) return
-    const updated = { ...activeVariant, ...patch }
+    const updated: ContentVariant = {
+      ...activeVariant,
+      ...patch,
+      verification_status: 'needs_revalidation',
+      compliance_status: 'needs_revalidation',
+      status: 'needs_revision',
+      verified_at: '',
+      version_history: [
+        ...(activeVariant.version_history || []),
+        { type: 'advisor_edit', at: new Date().toISOString(), fields: Object.keys(patch) },
+      ],
+    }
     setVariants(current => current.map(item => item.id === activeVariant.id ? updated : item))
     const currentHistory = histories[activeVariant.id] || [activeVariant]
     const currentIndex = historyIndexes[activeVariant.id] ?? currentHistory.length - 1
@@ -106,6 +119,28 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
     const restored = history[nextIndex]
     setHistoryIndexes(current => ({ ...current, [activeVariant.id]: nextIndex }))
     setVariants(current => current.map(item => item.id === activeVariant.id ? restored : item))
+  }
+
+
+  async function revalidate() {
+    if (!activeVariant || !generation) return
+    setRevalidating(true)
+    setError('')
+    try {
+      const response = await revalidateVariant(activeVariant)
+      const nextVariants = variants.map(item => item.id === activeVariant.id ? response.variant : item)
+      setVariants(nextVariants)
+      setGeneration({ ...generation, variants: nextVariants, evidence: response.evidence, compliance: response.compliance })
+      setActiveEvidenceId(response.variant.claims[0]?.evidence_id || '')
+      setActiveRiskId(response.variant.risk_annotations[0]?.id || '')
+      const nextHistory = [...(histories[activeVariant.id] || []), response.variant].slice(-30)
+      setHistories(current => ({ ...current, [activeVariant.id]: nextHistory }))
+      setHistoryIndexes(current => ({ ...current, [activeVariant.id]: nextHistory.length - 1 }))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '重新核验失败')
+    } finally {
+      setRevalidating(false)
+    }
   }
 
   async function save() {
@@ -252,6 +287,8 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
               onRegenerate={() => void regenerate()}
               onRewrite={(paragraphIndex, instruction) => void rewriteParagraph(paragraphIndex, instruction)}
               rewriting={rewriting}
+              onRevalidate={() => void revalidate()}
+              revalidating={revalidating}
             />
             <div className="studio-lower-actions">
               <button data-testid="video-package-toggle" onClick={() => setShowVideo(value => !value)}><Film size={17} />{showVideo ? '收起短视频方案' : '查看短视频方案'}<ChevronRight className={showVideo ? 'rotate-90' : ''} size={15} /></button>

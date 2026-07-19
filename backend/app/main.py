@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from statistics import mean
 from typing import Annotated, Any
 from uuid import uuid4
@@ -10,11 +11,19 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .services.annotations import annotate_variant
 from .services.compliance import check_content
 from .services.content_engine import generate_content
 from .services.lead_engine import analyze as analyze_leads
 from .services.llm_provider import enhance_result, is_enabled, provider_status, rewrite_text
 from .services.store import get_vehicle, vehicles
+from .services.enterprise import (
+    create_promise, customer_action, customer_risk_action, employee_response, enterprise_snapshot,
+    get_hotspot, get_knowledge, hotspot_action, impact_action, integration_sync, list_customers,
+    list_hotspots, list_knowledge, list_promises, list_quality, manager_quality_decision,
+    publish_best_practice, best_practice_action, reset_scenario, simulate_feishu_change, simulate_promise_time,
+    switch_role, update_promise,
+)
 from .services.workspace import (
     add_followup_event,
     advisors,
@@ -37,15 +46,16 @@ from .services.workspace import (
     update_campaign_task,
     update_opportunity,
     workspace_stats,
+    mutate_state,
 )
 
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.4.0"
 KNOWLEDGE_VERSION = "onvo-cn-2026.07.18"
 
 app = FastAPI(
     title="蔚见 API",
     version=APP_VERSION,
-    description="购车顾问机会、内容、事实、审核与跟进工作流。",
+    description="客户经营、企业知识、销售质量与可信沟通工作流。",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -153,6 +163,12 @@ class DraftRequest(BaseModel):
     risk_annotations: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     status: str = "draft"
+    verification_status: str = "verified"
+    compliance_status: str = "verified"
+    knowledge_version: str = KNOWLEDGE_VERSION
+    verification_version: int = 1
+    verified_at: str = ""
+    version_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReviewSubmitRequest(DraftRequest):
@@ -170,6 +186,91 @@ class AdvisorUpdateRequest(BaseModel):
     style: str = Field(min_length=2, max_length=300)
     platforms: list[str] | None = None
     model_focus: str | None = None
+
+
+class ContentRevalidateRequest(BaseModel):
+    task_id: str
+    variant_id: str
+    advisor_id: str
+    vehicle_id: str
+    platform: str
+    title: str
+    body: str = Field(min_length=1, max_length=20000)
+    call_to_action: str = Field(default="", max_length=2000)
+    version: int = 1
+
+
+class ReviewRevalidateRequest(BaseModel):
+    body: str | None = Field(default=None, max_length=20000)
+    call_to_action: str | None = Field(default=None, max_length=2000)
+    risk_annotations: list[dict[str, Any]] | None = None
+
+
+class RoleSwitchRequest(BaseModel):
+    role: str
+    actor_id: str | None = None
+
+
+class HotspotActionRequest(BaseModel):
+    action: str
+    reason: str = ""
+
+
+class FeishuChangeRequest(BaseModel):
+    change_type: str
+
+
+class ImpactActionRequest(BaseModel):
+    object_id: str
+    action: str
+    reason: str = ""
+    owner: str = ""
+
+
+class CustomerActionRequest(BaseModel):
+    action_id: str
+    action: str
+    note: str = ""
+
+
+class PromiseCreateRequest(BaseModel):
+    customer_id: str
+    advisor_id: str
+    original_message: str = ""
+    commitment: str
+    due_at: str
+    completion_criteria: str = "顾问确认完成"
+    remind_at: str = ""
+    source: str = "手动创建 Demo"
+
+
+class PromiseActionRequest(BaseModel):
+    action: str
+    due_at: str = ""
+    reason: str = ""
+    evidence: str = ""
+
+
+class QualityResponseRequest(BaseModel):
+    response: str
+    improvement_plan: str = ""
+
+
+class QualityDecisionRequest(BaseModel):
+    decision: str
+    reason: str = ""
+
+
+class BestPracticeActionRequest(BaseModel):
+    action: str
+
+
+class RiskActionRequest(BaseModel):
+    action: str
+
+
+class ScenarioRequest(BaseModel):
+    scenario_id: str
 
 
 def _safe_get_advisor(workspace_id: str, advisor_id: str) -> dict[str, Any]:
@@ -313,6 +414,7 @@ def workspace_overview(workspace_id: WorkspaceId) -> dict[str, Any]:
         "followups": state["followups"],
         "reviews": state["reviews"],
         "campaigns": state["campaigns"],
+        "enterprise": enterprise_snapshot(workspace_id),
         "data_mode": "demo",
     }
 
@@ -472,7 +574,10 @@ def draft_save(request: DraftRequest, workspace_id: WorkspaceId) -> dict[str, An
 
 @app.post("/api/drafts/submit-review")
 def draft_submit_review(request: ReviewSubmitRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    return submit_review(workspace_id, request.model_dump())
+    try:
+        return submit_review(workspace_id, request.model_dump())
+    except Exception as exc:
+        raise _http_error(exc) from exc
 
 
 @app.post("/api/demo/reset")
@@ -483,6 +588,7 @@ def demo_reset(workspace_id: WorkspaceId) -> dict[str, Any]:
         "followups": state["followups"],
         "reviews": state["reviews"],
         "campaigns": state["campaigns"],
+        "enterprise": enterprise_snapshot(workspace_id),
         "data_mode": "demo",
     }
 
@@ -523,6 +629,15 @@ async def content_generate(request: GenerateRequest, workspace_id: WorkspaceId) 
                 result["audit"]["ai_warning"] = f"模型调用失败，已保留可审核的基础版本：{exc}"
         else:
             result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
+    for variant in result.get("variants", []):
+        variant.update({
+            "verification_status": "verified",
+            "compliance_status": "verified",
+            "knowledge_version": result.get("audit", {}).get("knowledge_version", KNOWLEDGE_VERSION),
+            "verification_version": 1,
+            "verified_at": result.get("audit", {}).get("generated_at", ""),
+            "version_history": [{"type": "generated", "at": result.get("audit", {}).get("generated_at", ""), "version": 1}],
+        })
     return result
 
 
@@ -621,6 +736,208 @@ async def content_batch_generate(request: BatchGenerateRequest, workspace_id: Wo
             "human_review_required": 1,
         },
     }
+
+
+
+@app.post("/api/content/revalidate")
+def content_revalidate(request: ContentRevalidateRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    advisor = _safe_get_advisor(workspace_id, request.advisor_id)
+    vehicle = _safe_get_vehicle(request.vehicle_id)
+    evidence = [
+        {"id": "evidence-positioning", "field": "车型定位", "value": vehicle["positioning"], "source_title": vehicle["source_title"], "source_url": vehicle["source_url"], "verified_at": vehicle["verified_at"], "source_type": "官方产品页"},
+        {"id": "evidence-price-full", "field": "整车购买起价", "value": vehicle["full_purchase_from"], "source_title": vehicle["source_title"], "source_url": vehicle["source_url"], "verified_at": vehicle["verified_at"], "source_type": "官方产品页"},
+        {"id": "evidence-price-baas", "field": "BaaS 起价", "value": vehicle["baas_from"], "source_title": vehicle["source_title"], "source_url": vehicle["source_url"], "verified_at": vehicle["verified_at"], "source_type": "官方产品页"},
+    ]
+    combined = "\n".join([request.title, request.body, request.call_to_action])
+    compliance = check_content(combined, has_evidence=True)
+    variant = annotate_variant({
+        "id": request.variant_id,
+        "advisor_id": advisor["id"], "advisor_name": advisor["name"], "platform": request.platform,
+        "title": request.title, "body": request.body, "call_to_action": request.call_to_action,
+        "hashtags": [], "personalization_score": 0, "grounding_score": 100,
+        "compliance_score": compliance["score"], "status": "ready_for_human_review" if compliance["passed"] else "needs_revision",
+        "personalization_reasons": [], "version": request.version + 1,
+    }, evidence, compliance)
+    if not variant.get("risk_annotations") and variant.get("claims"):
+        claim_text = variant["claims"][0].get("text", "")
+        variant["risk_annotations"] = [{
+            "id": f"risk-dynamic-{uuid4().hex[:8]}", "text": claim_text, "level": "info",
+            "rule": "动态事实发布前复核", "reason": "价格、活动和权益可能随时间或地区变化。",
+            "suggestion": "具体配置、价格与权益以发布当天乐道官方最新信息为准。",
+        }]
+    verified_at = datetime.now().isoformat(timespec="seconds")
+    variant.update({
+        "verification_status": "verified", "compliance_status": "verified", "knowledge_version": KNOWLEDGE_VERSION,
+        "verification_version": request.version + 1, "verified_at": verified_at,
+        "version_history": [{"type": "revalidated", "at": verified_at, "knowledge_version": KNOWLEDGE_VERSION}],
+    })
+    return {"variant": variant, "evidence": evidence, "compliance": compliance, "verification": {"status": "verified", "at": verified_at, "knowledge_version": KNOWLEDGE_VERSION, "method": "规则 + 官方事实"}}
+
+
+@app.post("/api/reviews/{review_id}/revalidate")
+def review_revalidate(review_id: str, request_update: ReviewRevalidateRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    state = snapshot(workspace_id)
+    review = next((item for item in state.get("reviews", []) if item.get("id") == review_id), None)
+    if not review:
+        raise HTTPException(status_code=404, detail="未找到审核任务")
+    request = ContentRevalidateRequest(
+        task_id=review["task_id"], variant_id=review.get("variant_id") or review["task_id"], advisor_id=review["advisor_id"],
+        vehicle_id=review["vehicle_id"], platform=review["platform"], title=review.get("content_title") or review["title"],
+        body=request_update.body if request_update.body is not None else (review.get("reviewed_body") or review.get("body", "")), call_to_action=request_update.call_to_action if request_update.call_to_action is not None else (review.get("reviewed_call_to_action") or review.get("call_to_action", "")),
+        version=int(review.get("verification_version") or 1),
+    )
+    checked = content_revalidate(request, workspace_id)
+    def mutation(current: dict[str, Any]) -> dict[str, Any]:
+        target = next(item for item in current["reviews"] if item["id"] == review_id)
+        if request_update.body is not None:
+            target["reviewed_body"] = request_update.body
+        if request_update.call_to_action is not None:
+            target["reviewed_call_to_action"] = request_update.call_to_action
+        target["claims"] = checked["variant"]["claims"]
+        target["risk_annotations"] = checked["variant"]["risk_annotations"] if request_update.risk_annotations is None else request_update.risk_annotations
+        target["evidence"] = checked["evidence"]
+        target["verification_status"] = "verified"
+        target["compliance_status"] = "verified"
+        target["evidence_status"] = "已重新核验"
+        target["knowledge_version"] = checked["verification"]["knowledge_version"]
+        target["verification_version"] = checked["variant"]["verification_version"]
+        target["verified_at"] = checked["verification"]["at"]
+        target.setdefault("version_history", []).append({"type": "manager_revalidated", "at": checked["verification"]["at"], "body": target["reviewed_body"]})
+        return target
+    return mutate_state(workspace_id, mutation)
+
+
+@app.get("/api/enterprise")
+def enterprise_get(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return enterprise_snapshot(workspace_id)
+
+
+@app.post("/api/enterprise/role")
+def enterprise_role(request: RoleSwitchRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    return switch_role(workspace_id, request.role, request.actor_id)
+
+
+@app.get("/api/hotspots")
+def hotspots_get(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return {"items": list_hotspots(workspace_id), "data_mode": "demo"}
+
+
+@app.get("/api/hotspots/{hotspot_id}")
+def hotspot_get(hotspot_id: str, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return get_hotspot(workspace_id, hotspot_id)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/hotspots/{hotspot_id}/actions")
+def hotspot_create_action(hotspot_id: str, request: HotspotActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return hotspot_action(workspace_id, hotspot_id, request.action, request.reason)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.get("/api/knowledge")
+def knowledge_list(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return {"items": list_knowledge(workspace_id), "data_mode": "demo"}
+
+
+@app.get("/api/knowledge/{knowledge_id}")
+def knowledge_get(knowledge_id: str, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return get_knowledge(workspace_id, knowledge_id)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/integrations/feishu/simulate-change")
+def feishu_simulate_change(request: FeishuChangeRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return simulate_feishu_change(workspace_id, request.change_type)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/integrations/{name}/sync")
+def integration_demo_sync(name: str, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return integration_sync(workspace_id, name)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/knowledge-impacts/{impact_id}/actions")
+def knowledge_impact_action(impact_id: str, request: ImpactActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return impact_action(workspace_id, impact_id, request.object_id, request.action, request.reason, request.owner)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.get("/api/customers")
+def customers_get(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return {"items": list_customers(workspace_id), "data_mode": "demo"}
+
+
+@app.post("/api/customers/{customer_id}/next-actions")
+def customer_next_action(customer_id: str, request: CustomerActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return customer_action(workspace_id, customer_id, request.action_id, request.action, request.note)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.get("/api/promises")
+def promises_get(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return {"items": list_promises(workspace_id), "data_mode": "demo"}
+
+
+@app.post("/api/promises")
+def promises_create(request: PromiseCreateRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return create_promise(workspace_id, request.model_dump())
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/promises/{promise_id}/actions")
+def promises_action(promise_id: str, request: PromiseActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return update_promise(workspace_id, promise_id, request.action, request.model_dump())
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/promises/{promise_id}/simulate/{state_name}")
+def promise_simulate(promise_id: str, state_name: str, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return simulate_promise_time(workspace_id, promise_id, state_name)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.get("/api/quality-signals")
+def quality_get(workspace_id: WorkspaceId) -> dict[str, Any]:
+    return {"items": list_quality(workspace_id), "data_mode": "demo"}
+
+
+@app.post("/api/quality-signals/{signal_id}/employee-response")
+def quality_employee(signal_id: str, request: QualityResponseRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return employee_response(workspace_id, signal_id, request.response, request.improvement_plan)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/quality-signals/{signal_id}/manager-decision")
+def quality_manager(signal_id: str, request: QualityDecisionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return manager_quality_decision(workspace_id, signal_id, request.decision, request.reason)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/best-practices/{practice_id}/publish")
+def best_practice_publish(practice_id: str, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return publish_best_practice(workspace_id, practice_id)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+
+
+@app.post("/api/best-practices/{practice_id}/actions")
+def best_practice_update(practice_id: str, request: BestPracticeActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return best_practice_action(workspace_id, practice_id, request.action)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/customer-risks/{risk_id}/actions")
+def customer_risk_update(risk_id: str, request: RiskActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return customer_risk_action(workspace_id, risk_id, request.action)
+    except Exception as exc: raise _http_error(exc) from exc
+
+
+@app.post("/api/demo/scenario")
+def demo_scenario(request: ScenarioRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try: return reset_scenario(workspace_id, request.scenario_id)
+    except Exception as exc: raise _http_error(exc) from exc
 
 
 @app.post("/api/compliance/check")

@@ -39,7 +39,7 @@ def test_health_and_anonymous_workspace_header() -> None:
     health = client.get("/api/health")
     workspace = client.get("/api/workspace")
     assert health.status_code == 200
-    assert health.json()["version"] == "0.3.1"
+    assert health.json()["version"] == "0.4.0"
     generated = workspace.headers.get("X-Workspace-Id")
     assert generated and generated.startswith("anon-")
     followup = client.get("/api/workspace", headers={"X-Workspace-Id": generated})
@@ -94,54 +94,45 @@ def test_two_workspaces_are_isolated_and_reset_is_scoped() -> None:
     assert any(item["reason"] == "B 工作区审核记录" for item in after_reset_b["reviews"])
 
 
-def test_generation_submit_review_preserves_full_content_annotations_and_decision_changes() -> None:
-    generated = client.post("/api/content/generate", headers=A, json=generation_payload())
-    assert generated.status_code == 200
-    data = generated.json()
-    variant = data["variants"][1]
+def test_generation_submit_review_preserves_full_content_and_requires_revalidation_after_manager_edit() -> None:
+    generated = client.post("/api/content/generate", headers=A, json=generation_payload()).json()
+    variant = generated["variants"][1]
     long_body = variant["body"] + "\n\n这是审核时必须保留的完整尾部内容。"
     submit = client.post("/api/drafts/submit-review", headers=A, json={
-        "task_id": data["task_id"],
-        "variant_id": variant["id"],
-        "platform": variant["platform"],
-        "title": variant["title"],
-        "body": long_body,
-        "call_to_action": variant["call_to_action"],
-        "claims": variant["claims"],
-        "risk_annotations": variant["risk_annotations"],
-        "evidence": data["evidence"],
-        "campaign_name": data["campaign_name"],
-        "advisor_id": variant["advisor_id"],
-        "advisor_name": variant["advisor_name"],
-        "vehicle_id": data["vehicle"]["id"],
-        "risk_level": "medium",
-        "reason": "逐句审核测试",
-        "evidence_status": "已绑定",
+        "task_id": generated["task_id"], "variant_id": variant["id"], "platform": variant["platform"],
+        "title": variant["title"], "body": long_body, "call_to_action": variant["call_to_action"],
+        "claims": variant["claims"], "risk_annotations": variant["risk_annotations"], "evidence": generated["evidence"],
+        "campaign_name": generated["campaign_name"], "advisor_id": variant["advisor_id"], "advisor_name": variant["advisor_name"],
+        "vehicle_id": generated["vehicle"]["id"], "risk_level": "medium", "reason": "逐句审核测试", "evidence_status": "已绑定",
+        "verification_status": "verified", "compliance_status": "verified", "knowledge_version": "demo-2026.07",
     })
     assert submit.status_code == 200
     review = submit.json()
     assert review["body"] == long_body
     assert review["claims"] == variant["claims"]
     assert review["risk_annotations"] == variant["risk_annotations"]
-    assert review["evidence"] == data["evidence"]
+    assert review["evidence"] == generated["evidence"]
 
     edited = long_body.replace("这是审核时必须保留的完整尾部内容。", "经理已完成逐句修改。")
-    resolved_risks = [{**item, "text": item.get("suggestion", item.get("text", "")), "level": "info"} for item in variant["risk_annotations"]]
-    decision = client.post(f"/api/reviews/{review['id']}/decision", headers=A, json={
-        "decision": "approved",
-        "reason": "事实已复核，已应用修改。",
-        "body": edited,
-        "call_to_action": "预约前请再次确认具体时间。",
-        "risk_annotations": resolved_risks,
+    blocked = client.post(f"/api/reviews/{review['id']}/decision", headers=A, json={
+        "decision": "approved", "reason": "尝试直接批准", "body": edited,
+        "call_to_action": "预约前请再次确认具体时间。", "risk_annotations": variant["risk_annotations"],
     })
-    assert decision.status_code == 200
-    decided = decision.json()
-    assert decided["reviewed_body"] == edited
-    assert decided["reviewed_call_to_action"] == "预约前请再次确认具体时间。"
-    assert decided["risk_annotations"] == resolved_risks
-    assert decided["change_log"][-1]["body_changed"] is True
-    assert decided["change_log"][-1]["risk_annotations_changed"] is True
-
+    assert blocked.status_code == 422
+    stale = next(item for item in client.get("/api/reviews", headers=A).json()["items"] if item["id"] == review["id"])
+    assert stale["verification_status"] == "needs_revalidation"
+    checked = client.post(f"/api/reviews/{review['id']}/revalidate", headers=A, json={
+        "body": edited, "call_to_action": "预约前请再次确认具体时间。", "risk_annotations": variant["risk_annotations"],
+    })
+    assert checked.status_code == 200
+    assert checked.json()["reviewed_body"] == edited
+    assert checked.json()["verification_status"] == "verified"
+    approved = client.post(f"/api/reviews/{review['id']}/decision", headers=A, json={
+        "decision": "approved", "reason": "重新核验后批准", "body": edited,
+        "call_to_action": "预约前请再次确认具体时间。", "risk_annotations": checked.json()["risk_annotations"],
+    })
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
 
 def test_advisor_profile_persists_per_workspace_and_reset_restores_initial() -> None:
     update = client.patch("/api/advisors/advisor-hz-02", headers=A, json={
@@ -185,7 +176,7 @@ def test_followup_booking_uses_supplied_real_advisor_and_updates_stage() -> None
 def test_booking_records_the_customer_owner_advisor(customer_id: str, actor: str) -> None:
     response = client.post(f"/api/followups/{customer_id}/events", headers=A, json={
         "type": "test_drive_booked",
-        "actor": actor,
+        "actor": "客户端伪造姓名",
         "title": "预约归属顾问测试",
         "content": "2026-07-23 14:00 到店。",
         "scheduled_at": "2026-07-23 14:00",
@@ -311,3 +302,79 @@ def test_workspace_store_ttl_cleanup_and_thread_safe_mutation(monkeypatch: pytes
     with store._lock:
         store._entries[workspace_id]["last_access"] = time.monotonic() - 5
     assert store.active_count() == 0
+
+
+def test_feishu_demo_sync_creates_version_impact_and_stales_review() -> None:
+    before = client.get("/api/knowledge/knowledge-l80-positioning", headers=A).json()
+    response = client.post("/api/integrations/feishu/simulate-change", headers=A, json={"change_type":"campaign_end"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["knowledge"]["version"] != before["version"]
+    assert data["impact"]["affected"]["customers"] > 0
+    assert data["notification"]["demo_flag"] is True
+    reviews = client.get("/api/reviews", headers=A).json()["items"]
+    assert any(item["verification_status"] == "needs_revalidation" for item in reviews if item["vehicle_id"] == "l80")
+
+
+def test_content_edit_requires_revalidation_before_submit() -> None:
+    generated = client.post("/api/content/generate", headers=A, json=generation_payload()).json()
+    variant = generated["variants"][0]
+    stale_payload = {
+        "task_id":generated["task_id"],"variant_id":variant["id"],"platform":variant["platform"],"title":variant["title"],
+        "body":variant["body"]+" 已修改", "call_to_action":variant["call_to_action"],"claims":variant["claims"],
+        "risk_annotations":variant["risk_annotations"],"evidence":generated["evidence"],"campaign_name":generated["campaign_name"],
+        "advisor_id":variant["advisor_id"],"advisor_name":variant["advisor_name"],"vehicle_id":"l80",
+        "verification_status":"needs_revalidation","compliance_status":"needs_revalidation",
+    }
+    assert client.post("/api/drafts/submit-review", headers=A, json=stale_payload).status_code == 422
+    checked = client.post("/api/content/revalidate", headers=A, json={
+        "task_id":generated["task_id"],"variant_id":variant["id"],"advisor_id":variant["advisor_id"],"vehicle_id":"l80",
+        "platform":variant["platform"],"title":variant["title"],"body":stale_payload["body"],"call_to_action":variant["call_to_action"],"version":1,
+    })
+    assert checked.status_code == 200
+    assert checked.json()["variant"]["verification_status"] == "verified"
+
+
+def test_promise_quality_best_practice_and_scenario_isolation() -> None:
+    promise = client.post("/api/promises", headers=A, json={
+        "customer_id":"customer-chen","advisor_id":"advisor-hz-02","commitment":"今晚发送空间清单","due_at":"2026-07-20T20:00","original_message":"今晚发给您",
+    })
+    assert promise.status_code == 200
+    promise_id = promise.json()["id"]
+    assert client.post(f"/api/promises/{promise_id}/actions", headers=A, json={"action":"confirm"}).json()["status"] == "pending_execution"
+    assert client.post(f"/api/promises/{promise_id}/simulate/overdue", headers=A, json={}).json()["promise"]["overdue"] is True
+    assert client.post(f"/api/promises/{promise_id}/actions", headers=A, json={"action":"complete","evidence":"已发送"}).json()["status"] == "completed"
+
+    signal = client.get("/api/quality-signals", headers=A).json()["items"][0]
+    assert client.post(f"/api/quality-signals/{signal['id']}/employee-response", headers=A, json={"response":"客户当时询问旧活动截图","improvement_plan":"今后先核验知识版本"}).status_code == 200
+    decision = client.post(f"/api/quality-signals/{signal['id']}/manager-decision", headers=A, json={"decision":"coaching","reason":"安排动态事实辅导"})
+    assert decision.status_code == 200
+    assert decision.json()["created"]["type"] == "coaching"
+    practice = client.get("/api/enterprise", headers=A).json()["best_practices"][0]
+    published = client.post(f"/api/best-practices/{practice['id']}/publish", headers=A, json={})
+    assert published.status_code == 200 and published.json()["status"] == "published"
+    training = client.post(f"/api/best-practices/{practice['id']}/actions", headers=A, json={"action":"training_reference"})
+    assert training.status_code == 200 and training.json()["training_status"] == "ready"
+    cross_store = client.post(f"/api/best-practices/{practice['id']}/actions", headers=A, json={"action":"cross_store_publish"})
+    assert cross_store.status_code == 200 and cross_store.json()["adoption_status"] == "tracking"
+
+    client.post("/api/demo/scenario", headers=A, json={"scenario_id":"promise-overdue"})
+    assert client.get("/api/enterprise", headers=A).json()["enterprise_meta"]["demo_scenario"] == "promise-overdue"
+    assert client.get("/api/enterprise", headers=B).json()["enterprise_meta"]["demo_scenario"] != "promise-overdue"
+
+
+def test_enterprise_objects_include_workspace_and_audit_metadata() -> None:
+    enterprise = client.get("/api/enterprise", headers=A)
+    assert enterprise.status_code == 200
+    payload = enterprise.json()
+    required = {"workspace_id", "created_at", "updated_at", "source_type", "demo_flag", "created_by", "version"}
+    for key in [
+        "hotspots", "knowledge_items", "customer_profiles", "promises", "quality_signals",
+        "best_practices", "customer_risks", "experiments", "demo_scenarios", "audit_log",
+    ]:
+        assert payload[key], key
+        assert required.issubset(payload[key][0]), (key, payload[key][0])
+        assert payload[key][0]["workspace_id"] == A["X-Workspace-Id"]
+    assert required.issubset(payload["hotspots"][0]["evidence"][0])
+    assert required.issubset(payload["knowledge_items"][0]["versions"][0])
+    assert required.issubset(payload["customer_profiles"][0]["next_best_actions"][0])

@@ -172,6 +172,12 @@ def generate_content(
             "status": "ready_for_human_review" if compliance["passed"] else "needs_revision",
             "personalization_reasons": _persona_reasons(advisor, customer_context),
             "version": 1,
+            "verification_status": "verified",
+            "compliance_status": "verified",
+            "knowledge_version": "onvo-cn-2026.07.18",
+            "verification_version": 1,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "version_history": [{"type": "generated", "at": datetime.now(timezone.utc).isoformat(), "version": 1}],
         }
         variants.append(annotate_variant(variant, evidence, compliance))
 

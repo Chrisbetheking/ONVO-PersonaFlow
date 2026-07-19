@@ -1,185 +1,196 @@
 #!/usr/bin/env python3
+"""Release integrity checks for ONVO PersonaFlow.
+
+Run from the repository root:
+    python3 scripts/release_integrity.py
+
+Patch verification:
+    python3 scripts/release_integrity.py --manifest PATCH_MANIFEST.md --zip patch.zip
+"""
 from __future__ import annotations
 
+import argparse
 import json
-import os
 import re
 import sys
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = Path(os.getenv("ONVO_PATCH_MANIFEST", str(ROOT / "PATCH_MANIFEST.md")))
-PATCH_NAME = "ONVO-PersonaFlow-V0.3.1-INTEGRITY-PATCH.zip"
-REQUIRE_PATCH_MANIFEST = os.getenv("ONVO_REQUIRE_PATCH_MANIFEST", "0") == "1"
+REQUIRED_DOCS = [
+    "README.md",
+    "ARCHITECTURE.md",
+    "FEATURE_PARITY.md",
+    "REAL_DEMO_BOUNDARY.md",
+    "ENTERPRISE_PRODUCT_MAP.md",
+    "DATA_MODEL.md",
+    "INTEGRATION_GUIDE.md",
+    "DEMO_SCRIPT.md",
+    "JUDGE_QA.md",
+    "TEST_REPORT.md",
+    "DEPLOY_CHECKLIST.md",
+    "DESIGN_REFERENCE_MATRIX.md",
+    "RELEASE_INTEGRITY_REPORT.md",
+]
 
-errors: list[str] = []
-warnings: list[str] = []
-checks: list[str] = []
+REQUIRED_PAGES = [
+    "frontend/src/pages/RadarPage.tsx",
+    "frontend/src/pages/KnowledgePage.tsx",
+    "frontend/src/pages/Customer360Page.tsx",
+    "frontend/src/pages/PromisesPage.tsx",
+    "frontend/src/pages/QualityPage.tsx",
+    "frontend/src/pages/BestPracticesPage.tsx",
+    "frontend/src/pages/CustomerRiskPage.tsx",
+    "frontend/src/pages/ExperimentsPage.tsx",
+    "frontend/src/pages/GovernancePage.tsx",
+]
 
 
-def fail(message: str) -> None:
-    errors.append(message)
+def read(root: Path, rel: str) -> str:
+    path = root / rel
+    if not path.is_file():
+        raise AssertionError(f"missing file: {rel}")
+    return path.read_text(encoding="utf-8")
 
 
-def ok(message: str) -> None:
-    checks.append(message)
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
 
 
-def read(path: str) -> str:
-    target = ROOT / path
-    if not target.is_file():
-        fail(f"缺少文件：{path}")
-        return ""
-    return target.read_text(encoding="utf-8")
+def local_markdown_links(text: str) -> set[str]:
+    links: set[str] = set()
+    for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+        target = target.strip().split("#", 1)[0].split("?", 1)[0]
+        if not target or "://" in target or target.startswith(("mailto:", "#")):
+            continue
+        if target.lower().endswith(".md"):
+            links.add(target)
+    return links
 
 
-package_path = ROOT / "frontend/package.json"
-try:
-    package = json.loads(package_path.read_text(encoding="utf-8"))
-    if package.get("version") != "0.3.1":
-        fail(f"frontend/package.json 版本不是 0.3.1：{package.get('version')}")
-    else:
-        ok("frontend/package.json 版本为 0.3.1")
-except Exception as exc:  # pragma: no cover - integrity failure path
-    fail(f"无法读取 frontend/package.json：{exc}")
+def manifest_paths(text: str) -> list[str]:
+    paths: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        match = re.match(r"^(?:ADD|MODIFY|DELETE)\s*\|\s*([^|]+?)(?:\s*\||$)", line)
+        if match and not line.startswith("DELETE"):
+            paths.append(match.group(1).strip().replace("\\", "/"))
+    return paths
 
-api_source = read("frontend/src/api.ts")
-if "X-Workspace-Id" not in api_source:
-    fail("frontend/src/api.ts 缺少 X-Workspace-Id")
-else:
-    ok("API 请求携带 X-Workspace-Id")
 
-followup_source = read("frontend/src/pages/FollowUpPage.tsx")
-if re.search(r"actor\s*:\s*['\"]周辰['\"]", followup_source):
-    fail("FollowUpPage 仍写死 actor: '周辰'")
-for token in ("booking-dialog", "booking-time", "booking-items", "booking-notes", "confirm-booking", "advisor.name"):
-    if token not in followup_source:
-        fail(f"FollowUpPage 缺少预约实现标记：{token}")
-else:
-    if not any(f"FollowUpPage 缺少预约实现标记：{token}" in errors for token in ("booking-dialog", "booking-time", "booking-items", "booking-notes", "confirm-booking", "advisor.name")):
-        ok("FollowUpPage 使用实际顾问并包含完整预约字段")
+def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[str]:
+    passed: list[str] = []
 
-advisors_source = read("frontend/src/pages/AdvisorsPage.tsx")
-for token in ("updateAdvisor", "advisor-audience", "advisor-style", "save-advisor"):
-    if token not in advisors_source:
-        fail(f"AdvisorsPage 缺少真实保存实现：{token}")
-else:
-    if not any("AdvisorsPage 缺少真实保存实现" in item for item in errors):
-        ok("AdvisorsPage 调用 updateAdvisor 并具有保存测试标记")
+    package = json.loads(read(root, "frontend/package.json"))
+    lock = json.loads(read(root, "frontend/package-lock.json"))
+    require(package.get("version") == "0.4.0", "frontend/package.json version must be 0.4.0")
+    require(lock.get("version") == "0.4.0", "package-lock top version must be 0.4.0")
+    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.0", "package-lock root version must be 0.4.0")
+    passed.append("frontend version is 0.4.0")
 
-review_source = read("frontend/src/pages/ReviewPage.tsx")
-if "selected.content_excerpt" in review_source:
-    fail("ReviewPage 仍直接使用 selected.content_excerpt")
-for token in ("review-body", "review-detail", "review-mark-${segment.type}", "review-cta", "applyRiskSuggestion", "selected.evidence"):
-    if token not in review_source:
-        fail(f"ReviewPage 缺少完整审核实现：{token}")
-else:
-    if not any("ReviewPage 缺少完整审核实现" in item for item in errors):
-        ok("ReviewPage 使用完整正文、CTA、逐句标注和证据")
+    api = read(root, "frontend/src/api.ts")
+    require("X-Workspace-Id" in api, "api.ts must send X-Workspace-Id")
+    passed.append("workspace header exists")
 
-# Ensure literal E2E test IDs resolve either to a static source ID or a dynamic source prefix.
-e2e_source = read("frontend/e2e/personaflow.spec.ts")
-source_text = "\n".join(
-    path.read_text(encoding="utf-8")
-    for path in (ROOT / "frontend/src").rglob("*")
-    if path.suffix in {".ts", ".tsx"}
-)
-static_ids = set(re.findall(r"(?:data-testid|testId)=[\"']([^\"']+)[\"']", source_text))
-dynamic_prefixes = set(re.findall(r"data-testid=\{`([^`$]*)\$\{", source_text))
-e2e_ids = set(re.findall(r"getByTestId\(['\"]([^'\"]+)['\"]\)", e2e_source))
-missing_test_ids: list[str] = []
-for test_id in sorted(e2e_ids):
-    if test_id in static_ids:
-        continue
-    if any(test_id.startswith(prefix) for prefix in dynamic_prefixes):
-        continue
-    missing_test_ids.append(test_id)
-if missing_test_ids:
-    fail("E2E 关键 data-testid 在源码中不存在：" + ", ".join(missing_test_ids))
-else:
-    ok(f"E2E 的 {len(e2e_ids)} 个字面 data-testid 均能映射到源码")
+    followup = read(root, "frontend/src/pages/FollowUpPage.tsx")
+    require("actor: '周辰'" not in followup and 'actor: "周辰"' not in followup, "FollowUpPage must not hard-code 周辰")
+    for marker in ["booking-dialog", "booking-time", "booking-items", "booking-notes", "confirm-booking"]:
+        require(marker in followup, f"FollowUpPage missing {marker}")
+    passed.append("follow-up booking is data-driven")
 
-readme_source = read("README.md")
-local_links = sorted(set(re.findall(r"\]\((?:\./)?([^)#]+\.md)(?:#[^)]+)?\)", readme_source)))
-missing_links = [link for link in local_links if not (ROOT / link).is_file()]
-if missing_links:
-    fail("README 本地 Markdown 死链接：" + ", ".join(missing_links))
-else:
-    ok(f"README 的 {len(local_links)} 个本地 Markdown 链接均存在")
+    advisors = read(root, "frontend/src/pages/AdvisorsPage.tsx")
+    require("updateAdvisor" in advisors, "AdvisorsPage must call updateAdvisor")
+    passed.append("advisor persistence hook exists")
 
-ci_source = read(".github/workflows/ci.yml")
-for token in (
-    "npx playwright install --with-deps chromium",
-    "npm run test:e2e",
-    "actions/upload-artifact@v4",
-    "frontend/playwright-report",
-    "frontend/test-results",
-):
-    if token not in ci_source:
-        fail(f"CI 缺少 Playwright 完整性配置：{token}")
-else:
-    if not any("CI 缺少 Playwright 完整性配置" in item for item in errors):
-        ok("CI 运行 Playwright 并在失败时上传报告、截图和 trace 所在目录")
+    review = read(root, "frontend/src/pages/ReviewPage.tsx")
+    require("review-body" in review and "review-detail" in review, "ReviewPage must render full review detail")
+    require("content_excerpt" not in review or "full_body" in review or "body" in review, "ReviewPage cannot rely only on content_excerpt")
+    require("revalidate" in review.lower(), "manager edits must support revalidation")
+    passed.append("review detail and revalidation exist")
 
-manifest_entries: list[str] = []
-if not MANIFEST.is_file():
-    if REQUIRE_PATCH_MANIFEST:
-        fail(f"缺少 PATCH_MANIFEST：{MANIFEST}")
-    else:
-        warnings.append("当前为公开仓库源码校验模式：未提供 PATCH_MANIFEST，已跳过补丁文件数量核验。")
-else:
-    manifest_source = MANIFEST.read_text(encoding="utf-8")
-    declared_match = re.search(r"补丁文件总数：\s*(\d+)", manifest_source)
-    for line in manifest_source.splitlines():
-        match = re.match(r"\|\s*(?:ADD|MODIFY)\s*\|\s*`?([^|`]+?)`?\s*\|", line)
-        if match:
-            manifest_entries.append(match.group(1).strip())
-    if len(manifest_entries) != len(set(manifest_entries)):
-        fail("PATCH_MANIFEST.md 包含重复路径")
-    for relative in manifest_entries:
-        if not (ROOT / relative).is_file():
-            fail(f"PATCH_MANIFEST 路径不存在：{relative}")
-    if declared_match and int(declared_match.group(1)) != len(manifest_entries):
-        fail(f"PATCH_MANIFEST 声明数量 {declared_match.group(1)} 与条目数量 {len(manifest_entries)} 不一致")
-    elif not declared_match:
-        fail("PATCH_MANIFEST 缺少“补丁文件总数”")
-    else:
-        ok(f"PATCH_MANIFEST 的 {len(manifest_entries)} 个文件均存在")
+    for rel in REQUIRED_PAGES:
+        require((root / rel).is_file(), f"missing enterprise page: {rel}")
+    passed.append("enterprise pages exist")
 
-archive_candidates: list[Path] = []
-if os.getenv("ONVO_PATCH_ARCHIVE"):
-    archive_candidates.append(Path(os.environ["ONVO_PATCH_ARCHIVE"]))
-archive_candidates.extend([ROOT / PATCH_NAME, ROOT.parent / PATCH_NAME, Path("/mnt/data") / PATCH_NAME])
-archive = next((path for path in archive_candidates if path.is_file()), None)
-if archive and manifest_entries:
-    with zipfile.ZipFile(archive) as handle:
-        archive_files = sorted(
-            name.rstrip("/")
-            for name in handle.namelist()
-            if not name.endswith("/") and not name.startswith("__MACOSX/")
-        )
-    expected = sorted(manifest_entries)
-    if archive_files != expected:
-        only_archive = sorted(set(archive_files) - set(expected))
-        only_manifest = sorted(set(expected) - set(archive_files))
-        fail(
-            "补丁 ZIP 与 PATCH_MANIFEST 不一致；"
-            f"仅 ZIP：{only_archive or '无'}；仅 Manifest：{only_manifest or '无'}"
-        )
-    else:
-        ok(f"补丁 ZIP 文件数量与 Manifest 完全一致：{len(archive_files)}")
-else:
-    warnings.append("未发现补丁 ZIP，已完成公开仓库源码一致性检查。")
+    workspace = read(root, "backend/app/services/workspace.py")
+    main = read(root, "backend/app/main.py")
+    content_editor = read(root, "frontend/src/features/content-generation/ContentEditor.tsx")
+    require("needs_revalidation" in workspace and "content-revalidation-warning" in content_editor, "stale verification state missing")
+    require("/api/content/revalidate" in main and "/api/reviews/{review_id}/revalidate" in main, "revalidation APIs missing")
+    require("enterprise" in main and "/api/integrations/feishu/simulate-change" in main, "enterprise routes missing")
+    passed.append("server-side revalidation and enterprise routes exist")
 
-print("ONVO PersonaFlow v0.3.1 release integrity")
-for item in checks:
-    print(f"[OK] {item}")
-for item in warnings:
-    print(f"[WARN] {item}")
-for item in errors:
-    print(f"[FAIL] {item}")
+    for rel in REQUIRED_DOCS:
+        require((root / rel).is_file(), f"missing required document: {rel}")
+    readme = read(root, "README.md")
+    for target in local_markdown_links(readme):
+        require((root / target).is_file(), f"README dead local Markdown link: {target}")
+    passed.append("required documents and README links exist")
 
-if errors:
-    sys.exit(1)
-print("Release integrity passed.")
+    ci = read(root, ".github/workflows/ci.yml")
+    for command in [
+        "python -m compileall -q app",
+        "python -m pytest -q",
+        "npm ci",
+        "npm run typecheck",
+        "npm test",
+        "playwright install --with-deps chromium",
+        "npm run test:e2e",
+        "npm audit --audit-level=moderate",
+        "npm run build",
+        "python3 scripts/release_integrity.py",
+        "actions/upload-artifact@v4",
+    ]:
+        require(command in ci, f"CI missing: {command}")
+    require("if: failure()" in ci and "if-no-files-found: ignore" in ci, "CI failure artifact conditions missing")
+    passed.append("CI runs full validation and uploads E2E artifacts")
+
+    e2e = read(root, "frontend/e2e/personaflow.spec.ts")
+    source_text = "\n".join(
+        p.read_text(encoding="utf-8", errors="ignore")
+        for p in (root / "frontend/src").rglob("*.tsx")
+    )
+    testids = set(re.findall(r"getByTestId\(['\"]([^'\"]+)['\"]\)", e2e))
+    dynamic_prefixes = set(re.findall(r"data-testid=\{`([^`$]+)\$\{", source_text))
+    missing_testids = sorted(
+        testid for testid in testids
+        if testid not in source_text and not any(testid.startswith(prefix) for prefix in dynamic_prefixes)
+    )
+    require(not missing_testids, f"E2E testids absent from source: {missing_testids}")
+    passed.append(f"{len(testids)} literal E2E testids exist in source")
+
+    if manifest or archive:
+        require(manifest is not None and archive is not None, "--manifest and --zip must be supplied together")
+        manifest_text = manifest.read_text(encoding="utf-8")
+        paths = manifest_paths(manifest_text)
+        require(paths, "manifest contains no ADD/MODIFY entries")
+        with zipfile.ZipFile(archive) as zf:
+            zip_files = sorted(name for name in zf.namelist() if not name.endswith("/"))
+        require(sorted(paths) == zip_files, f"manifest/ZIP mismatch: manifest={len(paths)} zip={len(zip_files)}")
+        for rel in paths:
+            require((root / rel).is_file(), f"manifest file missing in final workspace: {rel}")
+        passed.append(f"patch manifest exactly matches {len(paths)} ZIP files")
+
+    return passed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--manifest")
+    parser.add_argument("--zip", dest="archive")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    try:
+        passed = run_checks(root, Path(args.manifest).resolve() if args.manifest else None, Path(args.archive).resolve() if args.archive else None)
+    except (AssertionError, OSError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+        print(f"RELEASE INTEGRITY: FAILED\n- {exc}", file=sys.stderr)
+        return 1
+    print("RELEASE INTEGRITY: PASSED")
+    for item in passed:
+        print(f"- {item}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

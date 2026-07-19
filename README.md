@@ -1,141 +1,127 @@
-# 蔚见｜购车顾问私域经营 Agent
+# 蔚见｜客户经营与销售质量智能中枢
 
-> 把客户真实问题转化成有事实依据、可审核、能推动试驾的沟通行动，并把后续反馈沉淀为下一次更准确的顾问记忆。
+> 把企业知识、客户沟通和门店人工判断连成可追溯的经营闭环；既帮助顾问推进客户下一步，也帮助组织及时发现知识变化和服务质量信号。
 
-ONVO PersonaFlow（产品名：**蔚见**）面向一线购车顾问、门店经理和总部运营。它不是单纯的文案生成器，而是覆盖“机会发现—客户理解—多平台内容—事实溯源—风险审核—客户跟进—试驾预约—记忆更新”的工作流原型。
+ONVO PersonaFlow v0.4.0 延续 v0.3.x 的今日机会、内容作战台、跟进、审核和批量任务，在同一 React / TypeScript / Vite + FastAPI 工程中增加企业知识、热点雷达、客户 360、承诺台账、质量辅导、优秀案例和 Demo Adapter。它不是自动处罚系统，也不把演示数据伪装成生产数据。
 
-## 业务问题
-
-购车顾问每天面对大量私聊、朋友圈活动和车型问题。统一素材难以匹配不同城市、客群和顾问表达方式；顾问自行创作又容易出现车型事实过期、价格权益表述不严谨、客户反馈无法沉淀等问题。蔚见将每一次内容任务放回具体客户、顾问、车型和活动上下文中，并要求事实与风险在发布前可定位、可修改、可追溯。
-
-## 主要用户
-
-- **购车顾问**：处理今日机会、生成和编辑沟通内容、记录客户回复与试驾。
-- **门店经理**：查看完整正文和逐句依据，批准或退回内容。
-- **总部/门店运营**：执行活动批量任务、查看失败明细、重试和抽样审核。
-
-## 完整闭环
+## 三个闭环
 
 ```text
-总部活动 / 客户消息 / 历史反馈
-              ↓
-          今日机会
-              ↓
-     客户、顾问与场景理解
-              ↓
-     私聊 / 朋友圈 / 小红书
-              ↓
-       事实依据与风险定位
-              ↓
-          门店逐句审核
-              ↓
-       客户回复与试驾预约
-              ↓
-        客户和顾问记忆更新
-              ↓
-        下一轮推荐更加准确
+知识更新：模拟飞书知识变化 → 新版本 → 影响分析 → 重新核验任务 → 通知与审计
+客户经营：客户咨询 → 下一最佳行动 → 可信内容 → 审核 → 跟进/试驾/承诺 → 记忆更新
+组织学习：沟通证据 → 待复核信号 → 员工说明 → 经理确认 → 辅导或优秀案例
 ```
+
+## 角色空间
+
+- **顾问空间**：今日机会、客户沟通、内容作战台、跟进与承诺、客户档案。
+- **门店经理空间**：门店雷达、审核队列、客户风险、质量与辅导、承诺履约、活动执行。
+- **总部运营空间**：热点与洞察、知识中心、活动编排、优秀案例、效果验证、系统治理。
+
+公开演示允许同一身份切换三个空间，并明确标记“角色演示”；这不代表已实现企业 RBAC。
 
 ## 90 秒演示路径
 
-1. 在“今日机会”选择“陈女士 · L80 家庭空间咨询”。
-2. 进入内容作战台，生成私聊、朋友圈和小红书三个版本。
-3. 点击正文中的事实陈述和风险表达，查看右侧来源、核验日期、原因和替换建议。
-4. 应用建议、保存并提交门店审核。
-5. 经理查看完整正文并批准。
-6. 在“跟进与记忆”补录客户回复，确认新增记忆。
-7. 打开试驾预约，编辑时间、携带物品和备注后确认。
-8. 在“活动与批量任务”查看单任务明细、失败原因、重试和抽样审核。
+1. 在右上角切换到“总部运营空间”，打开“知识中心”。
+2. 点击“模拟飞书知识变更”，查看新知识版本、diff、影响对象和重新核验任务。
+3. 切换“顾问空间”，进入内容作战台；编辑正文后，事实与合规状态立即变为“需要重新核验”，提交被禁用。
+4. 执行重新核验后提交审核。
+5. 切换“门店经理空间”，查看完整内容、证据和风险后人工批准。
+6. 打开“跟进与承诺”，将客户沟通中的承诺确认、提醒并标记完成。
+7. 在“质量与辅导”查看原始证据、员工说明，由经理创建辅导计划；不自动处罚。
 
-完整讲解见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)。
+完整路径见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)。
 
-## 核心能力
+## 已真实实现
 
-- 按浏览器 UUID 隔离公开演示工作区，所有 API 携带 `X-Workspace-Id`。
-- 工作区状态具有 TTL、线程安全清理和当前会话独立重置。
-- 顾问画像、客户阶段、顾虑、活动 Brief 和车型事实共同参与生成。
-- 三个平台内容可编辑、撤销、保存、提交审核和局部改写。
-- 完整正文、CTA、claims、risk annotations 和 evidence 在审核中不丢失。
-- 批量任务保存顾问、平台、状态、失败原因、重试次数和生成结果。
-- 客户回复自动形成时间线事件和新记忆。
-- 试驾预约记录真实负责顾问、时间、地点、携带物品和备注。
-- 短视频区可提交已有 `/api/video/start`；未配置渲染服务时只保存脚本和分镜，不宣称已生成成片。
-- 后端或模型不可用时提供明确标记的本地规则演示闭环。
+- 浏览器 UUID + `X-Workspace-Id` 工作区隔离、TTL、线程安全清理和当前会话独立重置。
+- 内容编辑后 claims、evidence、compliance 失效；重新核验后才能提交或批准。
+- 服务端根据 `customer_id` 获取负责顾问，不信任客户端随意指定 actor。
+- 企业知识版本、变化 diff、影响对象、重新核验任务、模拟通知和审计记录。
+- 客户 360、判断依据、下一最佳行动及其接受/延后/转经理状态。
+- 客户承诺确认、提醒、延期、完成、超时模拟和时间线更新。
+- 销售质量待复核队列、原始沟通证据、员工补充说明、经理决定和辅导计划。
+- 经理确认后的优秀案例发布。
+- 热点转内容、触达、知识草稿或辅导任务。
+- DeepSeek 可选增强、规则 fallback、短视频连接器、批量任务和离线演示。
 
-## 真实数据与演示数据边界
+## Demo / 真实边界
 
-- 顾问、客户、活动、审核和跟进均为脱敏演示数据，界面会明确显示“脱敏演示数据”或“离线演示数据”。
-- 车型事实来自仓库内的公开资料适配层，保留来源标题、链接和核验日期；发布前仍需核验最新官方信息。
-- DeepSeek 仅在后端配置密钥后调用；模型不可用时使用规则和事实库兜底，不能伪装成 AI 结果。
-- 当前没有接入真实 CRM、企业微信、平台发布或试驾系统，不会自动联系客户或创建真实预约。
-- 公开演示状态保存在服务进程内，并非生产数据库；服务重启或 TTL 到期后会恢复初始状态。
+- 当前公开仓库使用脱敏固定样本和当前 workspace 内的真实状态变更。
+- 飞书、CRM、企业沟通渠道和外部趋势使用结构化 Demo Adapter，并在界面标记“模拟同步”“演示数据”或“未连接生产系统”。
+- 当前没有连接真实飞书企业应用、CRM、企业微信、真实试驾系统、HR 处罚系统或舆情爬虫。
+- 模型不可用时使用规则 fallback，不能显示为 DeepSeek 结果。
+- 所有质量信号都需要员工补充和经理人工确认；系统不自动处罚或扣分。
 
-## 系统架构
+完整边界见 [REAL_DEMO_BOUNDARY.md](./REAL_DEMO_BOUNDARY.md)。
+
+## 技术架构
 
 ```text
-Vercel / Vite React 前端
+Vercel / Vite React
+  ├─ 角色空间、客户经营、知识、质量与审核工作区
   ├─ localStorage workspace UUID
-  ├─ 今日机会 / 内容作战台 / 跟进 / 审核 / 批量任务
-  └─ 离线演示适配层
-                 │ X-Workspace-Id
-                 ▼
-Render / FastAPI 后端
-  ├─ WorkspaceStore：会话隔离、深复制、TTL、RLock
-  ├─ 规则内容引擎 + 车型事实
-  ├─ DeepSeek / OpenAI-compatible 可选增强
-  ├─ 逐句标注与合规检查
-  └─ 可选视频后端连接器
+  └─ 明确标记的离线 Demo Adapter
+                  │ X-Workspace-Id
+                  ▼
+Render / FastAPI
+  ├─ WorkspaceStore：深复制、隔离、TTL、RLock
+  ├─ 内容/事实/合规/审核/跟进服务
+  ├─ 企业知识、热点、承诺、质量、案例服务
+  ├─ Feishu / CRM / Messaging / Trends Demo Adapter
+  └─ DeepSeek 与视频服务可选连接器
 ```
 
-详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)。设计参考边界见 [DESIGN_REFERENCE_MATRIX.md](./DESIGN_REFERENCE_MATRIX.md)。
+详见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[DATA_MODEL.md](./DATA_MODEL.md) 和 [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)。
 
 ## 本地运行
 
 要求：Python 3.12+、Node.js 22+、npm。
 
 ```bash
-# 后端
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --port 8000
+python -m pip install -r requirements-dev.txt
+PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
+另开终端：
+
 ```bash
-# 前端（另一个终端）
 cd frontend
 npm ci
 npm run dev
 ```
 
-打开 `http://localhost:5173`。Vite 开发服务器会把 `/api` 代理到 `http://localhost:8000`。
+打开 `http://localhost:5173`。
 
 ## 环境变量
 
-复制 `.env.example`，真实密钥只放后端部署环境：
+复制 `.env.example`。真实密钥只放后端部署环境，不提交 GitHub。
+
+最小配置：
 
 ```env
 CORS_ORIGINS=http://localhost:5173
+LLM_PROVIDER_MODE=demo
+INTEGRATION_MODE=demo
+```
+
+DeepSeek 可选配置：
+
+```env
 LLM_PROVIDER_MODE=deepseek
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
-VIDEO_BACKEND_URL=
-VIDEO_BACKEND_TOKEN=
 ```
 
-前端部署只需要：
+生产连接器占位变量及映射见 [.env.example](./.env.example) 和 [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)。
 
-```env
-VITE_API_BASE=https://你的-render-后端地址
-```
-
-## 部署
+## Vercel 与 Render
 
 ### Render 后端
-
-仓库已提供 `render.yaml`。也可以手动配置：
 
 ```text
 Root Directory: backend
@@ -143,8 +129,6 @@ Build Command: pip install -r requirements.txt
 Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check: /api/health
 ```
-
-在 Render 设置 `CORS_ORIGINS` 为正式 Vercel 域名，并按需设置 DeepSeek 和视频服务密钥。
 
 ### Vercel 前端
 
@@ -156,9 +140,13 @@ Build Command: npm run build
 Output Directory: dist
 ```
 
-设置 `VITE_API_BASE` 为 Render 基础地址。`frontend/vercel.json` 已包含 SPA 路由重写。
+前端环境变量：
 
-完整检查见 [DEPLOY_CHECKLIST.md](./DEPLOY_CHECKLIST.md)。
+```env
+VITE_API_BASE=https://你的-render-后端地址
+```
+
+完整上线检查见 [DEPLOY_CHECKLIST.md](./DEPLOY_CHECKLIST.md)。
 
 ## 验证
 
@@ -169,27 +157,32 @@ cd ../frontend
 npm ci
 npm run typecheck
 npm test
-npx playwright install chromium
+npx playwright install --with-deps chromium
 npm run test:e2e
 npm audit --audit-level=moderate
 npm run build
+cd ..
+python3 scripts/release_integrity.py
 ```
 
-## 当前限制与后续接入
+CI 执行同样的检查，并在 Playwright 失败时上传 `playwright-report` 和 `test-results`。
 
-- **CRM**：以 `customer_id`、`advisor_id`、`campaign_id` 为稳定键，将演示适配层替换为 CRM 事件和客户资料 API。
-- **企业微信**：增加 OAuth、员工身份映射、会话回调与发送前人工确认；敏感字段需分级授权和审计。
-- **试驾系统**：将当前预约确认 payload 映射到真实可用时段、门店、车辆和参与人接口，并支持改约/取消状态回写。
-- **生产持久化**：将内存 WorkspaceStore 替换为 PostgreSQL/Redis，保留 workspace/session 边界、TTL 和审计记录。
-- **企业合规**：接入品牌规范、法务规则版本和人工审批权限，不能仅依赖模型判断。
-- **内容发布**：当前只生成、复制、导出和审核；生产环境需通过平台官方接口并保留用户确认。
+## 当前限制与生产接入
 
-## 文档
+- 当前状态存于进程内 workspace；生产环境需迁移到 PostgreSQL / Redis 并保留审计和隔离语义。
+- Demo Adapter 仅模拟同步、差异、审批和通知；生产接入必须完成 OAuth、Webhook 验签、字段映射、冲突策略和权限审计。
+- 当前不自动发布内容、不自动联系客户、不创建真实试驾预约。
+- 当前效果验证页只提供实验设计与样本边界，不声称已经获得真实转化提升。
 
-- [FEATURE_PARITY.md](./FEATURE_PARITY.md)：旧功能保留与新入口。
-- [TEST_REPORT.md](./TEST_REPORT.md)：实际执行的测试、环境限制和手工验收。
-- [DEPLOY_CHECKLIST.md](./DEPLOY_CHECKLIST.md)：Render、Vercel、CI 和上线检查。
-- [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)：90 秒、3 分钟和断网备用脚本。
-- [ARCHITECTURE.md](./ARCHITECTURE.md)：前后端模块、数据流和会话隔离。
-- [JUDGE_QA.md](./JUDGE_QA.md)：评委常见问题与真实回答。
-- [DESIGN_REFERENCE_MATRIX.md](./DESIGN_REFERENCE_MATRIX.md)：已完成页面的交互参考边界。
+## 仓库文档
+
+- [FEATURE_PARITY.md](./FEATURE_PARITY.md)：v0.3.x 功能保留与 v0.4.0 新入口。
+- [ENTERPRISE_PRODUCT_MAP.md](./ENTERPRISE_PRODUCT_MAP.md)：角色、页面与业务闭环。
+- [REAL_DEMO_BOUNDARY.md](./REAL_DEMO_BOUNDARY.md)：真实实现、Demo Adapter 和接口占位。
+- [DATA_MODEL.md](./DATA_MODEL.md)：核心对象和稳定 ID。
+- [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)：飞书、CRM、沟通和趋势接入方式。
+- [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)：90 秒、3 分钟和 8 分钟演示。
+- [JUDGE_QA.md](./JUDGE_QA.md)：评委问答。
+- [TEST_REPORT.md](./TEST_REPORT.md)：实际测试结果。
+- [DESIGN_REFERENCE_MATRIX.md](./DESIGN_REFERENCE_MATRIX.md)：交互参考和明确拒绝的模式。
+- [RELEASE_INTEGRITY_REPORT.md](./RELEASE_INTEGRITY_REPORT.md)：发布一致性检查。

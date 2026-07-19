@@ -1,67 +1,97 @@
-# ONVO PersonaFlow 架构说明
+# 架构说明
 
-## 1. 部署拓扑
+## 1. 总体结构
+
+项目保持 React 18、TypeScript、Vite 和 FastAPI，不引入大型后台框架。
 
 ```mermaid
 flowchart LR
-  Browser[浏览器 / Vercel 前端] -->|X-Workspace-Id| API[Render / FastAPI]
-  Browser --> Local[localStorage 离线演示工作区]
-  API --> Store[WorkspaceStore 内存会话状态]
-  API --> Facts[车型事实与合规规则]
-  API --> LLM[可选 DeepSeek / OpenAI-compatible]
-  API --> Video[可选视频渲染服务]
+  Browser[浏览器 / Vercel] -->|X-Workspace-Id| API[FastAPI / Render]
+  Browser --> Local[本地演示适配层]
+  API --> Store[WorkspaceStore]
+  API --> Core[内容/审核/跟进服务]
+  API --> Enterprise[企业经营服务]
+  Enterprise --> Adapters[Demo Adapters]
+  API --> LLM[DeepSeek 可选]
+  API --> Video[视频服务可选]
 ```
-
-前端使用 React、TypeScript、Vite；后端使用 FastAPI。前端与后端通过 `X-Workspace-Id` 隔离公开演示会话。
 
 ## 2. 前端模块
 
-- `frontend/src/app`：应用入口、路由、全局 Context 与主框架。
-- `frontend/src/pages`：今日机会、内容作战台、跟进、审核、批量任务、顾问管理和设置。
-- `frontend/src/features`：机会队列、内容编辑、事实定位、风险建议、客户时间线和批量任务表。
-- `frontend/src/shared`：类型无关 UI、离线演示状态和工作流工具。
-- `frontend/src/api.ts`：集中 API 调用、超时、错误转换和工作区 Header。
+- `frontend/src/app`：全局 Provider、角色空间、路由和壳层。
+- `frontend/src/pages`：页面组合层，包括原有页面及热点、知识、客户 360、承诺、质量、优秀案例、客户风险、效果验证和治理。
+- `frontend/src/features`：内容编辑、事实溯源、风险标注、跟进和批量任务等可复用业务能力。
+- `frontend/src/shared`：Demo 数据、工作流纯函数、UI 基础组件和离线适配。
+- `frontend/e2e`：跨页面业务闭环测试。
+
+前端首次访问生成 UUID 并保存到 `localStorage`，所有 API 请求由 `api.ts` 统一携带 `X-Workspace-Id`。
 
 ## 3. 后端模块
 
-- `backend/app/main.py`：API 合约和请求模型。
-- `services/workspace.py`：按工作区隔离的状态、TTL、线程安全读写和重置。
-- `services/content_engine.py`：规则内容生成和视频脚本包。
-- `services/annotations.py`：事实 claims、evidence 与风险标注关系。
-- `services/compliance.py`：合规规则扫描。
-- `services/llm_provider.py`：可选模型增强和失败降级。
-- `services/lead_engine.py`：客户回复意向与顾虑分析。
+- `workspace.py`：工作区模板深复制、隔离、TTL、线程安全、重置、原有审核与跟进状态。
+- `content_engine.py`：规则内容、claims、evidence 和合规结果。
+- `enterprise.py`：热点、知识影响、客户行动、承诺、质量、辅导、案例、风险和场景状态转换。
+- `integrations.py`：飞书、CRM、授权沟通渠道、趋势 Demo Adapter。
+- `main.py`：Pydantic 请求校验和 HTTP 路由；服务端重新确认负责顾问、审核状态和 workspace。
 
-## 4. 核心数据流
+## 4. 可信内容状态机
 
-```text
-机会 / 客户 / 顾问 / 活动
-        ↓
-规则内容生成 + 可选模型增强
-        ↓
-ContentVariant + Claim + Evidence + RiskAnnotation
-        ↓
-保存草稿 / 提交完整审核对象
-        ↓
-经理修改正文、CTA 和风险建议
-        ↓
-客户回复 / 预约 / 记忆更新
+```mermaid
+stateDiagram-v2
+  [*] --> verified: 生成并核验
+  verified --> needs_revalidation: 顾问或经理修改正文/CTA
+  needs_revalidation --> verified: 服务端重新抽取 claims、关联 evidence、执行 compliance
+  needs_revalidation --> needs_revalidation: 保存草稿
+  verified --> submitted: 提交审核
+  submitted --> needs_revalidation: 经理修改内容
+  submitted --> approved: 经理未修改且核验有效
+  needs_revalidation --> approved: 禁止
 ```
 
-审核对象保存完整正文、CTA、平台、claims、risk annotations 和 evidence；审核决定额外保存经理修改后的正文、CTA、意见和变更记录。
+核验记录保存版本、知识版本、时间和方式。历史已发送内容不静默替换，只保留当时知识版本。
 
-## 5. 工作区隔离
+## 5. 企业知识变化
 
-浏览器第一次访问时生成 UUID 并保存到 `localStorage`。所有 API 请求都携带 `X-Workspace-Id`。后端为每个 ID 从初始 JSON 深复制独立状态，使用 `RLock` 保护并发修改，并按 TTL 清理。缺少或非法 Header 时，后端生成新的匿名 ID，并通过响应 Header 返回，不会使用共享 `default` 状态。
+```mermaid
+sequenceDiagram
+  participant U as 总部运营
+  participant F as Feishu Demo Adapter
+  participant K as Knowledge Service
+  participant W as WorkspaceStore
+  U->>F: 模拟知识变更
+  F->>K: 结构化新版本与 diff
+  K->>W: 标记旧版本、保存新版本
+  K->>W: 生成影响对象与重新核验任务
+  K->>W: 写入模拟通知、审批与审计
+```
 
-## 6. 离线 fallback
+## 6. 销售质量流程
 
-当 API 不可达时，前端切换到以工作区 UUID 为键的本地演示状态。离线模式可执行规则内容生成、编辑、事实与风险定位、审核、跟进、预约、记忆和批量任务；界面会明确标记“离线演示数据”，不会显示为 DeepSeek 或生产结果。
+质量信号只表示“待复核”。对象保留原始沟通、触发规则、系统解释、员工说明和经理决定。经理可选择无需处理、提醒、辅导、培训、观察或记录“需进入企业正式流程”；本系统不执行处罚。
 
-## 7. 生产化替换点
+## 7. Demo Adapter
 
-- 将内存 WorkspaceStore 替换为 PostgreSQL / Redis。
-- 将演示客户适配层替换为 CRM 和企微事件。
-- 将预约事件替换为真实门店、车辆和时间段接口。
-- 将合规规则替换为企业版本化规则库与权限体系。
-- 将视频预览连接器替换为真实异步渲染队列。
+每个 Adapter 返回结构化数据并参与真实状态变化：
+
+- Feishu：知识变更、通知、审批。
+- CRM：客户资料、阶段、负责人和同步冲突。
+- Messaging：顾问发送、客户回复和授权渠道来源。
+- Trends：模拟公开趋势和区域事件。
+
+生产占位只定义环境变量、Webhook 和映射边界，不伪装已接入。
+
+## 8. 数据持久化边界
+
+当前每个 workspace 的状态保存在服务进程内，刷新保留、进程重启或 TTL 到期后恢复模板。生产化建议：
+
+- PostgreSQL 保存业务对象和不可变审计事件；
+- Redis 保存会话、锁和 TTL；
+- 对象存储保存合规允许的附件；
+- 企业 IAM / RBAC 替代“角色演示”。
+
+## 9. 故障与 fallback
+
+- 后端不可用：前端切换明确标记的本地演示状态。
+- 模型不可用：规则内容和事实库 fallback，不显示为模型结果。
+- 视频服务未配置：只保存脚本和分镜，状态为 preview。
+- Adapter 未配置：保持 demo 或 placeholder 状态，并显示“未连接生产系统”。

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, Clipboard, Copy, Download, RotateCcw, Save, Send, Undo2, Redo2, WandSparkles } from 'lucide-react'
+import { Check, Clipboard, Copy, Download, RotateCcw, Save, Send, Undo2, Redo2, WandSparkles, ShieldCheck } from 'lucide-react'
 import type { ContentVariant, Evidence, RiskAnnotation } from '../../types'
 import { annotateText, canSubmitVariant } from '../../shared/workflow'
 import { Button, StatusPill } from '../../shared/ui'
@@ -22,6 +22,8 @@ export function ContentEditor({
   onRegenerate,
   onRewrite,
   rewriting,
+  onRevalidate,
+  revalidating,
 }: {
   variant: ContentVariant
   evidence: Evidence[]
@@ -40,12 +42,16 @@ export function ContentEditor({
   onRegenerate: () => void
   onRewrite: (paragraphIndex: number, instruction: string) => void
   rewriting: boolean
+  onRevalidate: () => void
+  revalidating: boolean
 }) {
   const [paragraphIndex, setParagraphIndex] = useState(0)
   const [instruction, setInstruction] = useState('更简洁')
   const paragraphs = useMemo(() => variant.body.split(/\n{2,}/).filter(Boolean), [variant.body])
   const blocking = variant.risk_annotations.filter(item => item.level === 'block').length
-  const canSubmit = canSubmitVariant(variant.body, variant.claims.length, blocking)
+  const structurallyReady = canSubmitVariant(variant.body, variant.claims.length, blocking)
+  const verified = variant.verification_status === 'verified'
+  const canSubmit = structurallyReady && verified
   const preview = `${variant.title}\n\n${variant.body}\n\n${variant.call_to_action}`
   const segments = annotateText(preview, variant.claims, variant.risk_annotations)
 
@@ -74,6 +80,7 @@ export function ContentEditor({
           <button onClick={downloadText} aria-label="导出文本"><Download size={16} /></button>
         </div>
       </div>
+      {verified ? <div className="verification-banner verified"><ShieldCheck size={17} /><span><strong>事实与合规已核验</strong><small>知识版本 {variant.knowledge_version} · {variant.verified_at || '本次生成'}</small></span></div> : <div className="verification-banner stale" data-testid="content-revalidation-warning"><ShieldCheck size={17} /><span><strong>内容已发生变化</strong><small>原事实与合规结论已失效，请重新核验后提交。</small></span><Button data-testid="revalidate-content" variant="secondary" loading={revalidating} onClick={onRevalidate}>重新核验</Button></div>}
       <label className="field-label">标题<input data-testid="content-title" value={variant.title} onChange={event => onChange({ title: event.target.value })} /></label>
       <label className="field-label editor-body-label">正文<textarea data-testid="content-body" value={variant.body} onChange={event => onChange({ body: event.target.value })} /></label>
       <div className="rewrite-bar">
@@ -93,7 +100,7 @@ export function ContentEditor({
         <Button variant="ghost" onClick={onRegenerate}><RotateCcw size={16} />重新生成此版本</Button>
         <div><Button data-testid="save-draft" variant="secondary" loading={saving} onClick={onSave}><Save size={16} />保存草稿</Button><Button data-testid="submit-review" loading={submitting} disabled={!canSubmit} onClick={onSubmit}><Send size={16} />提交审核</Button></div>
       </div>
-      {!canSubmit ? <div className="submission-hint"><Check size={15} /><span>{blocking ? '存在阻断风险，修改后才能提交。' : !variant.claims.length ? '至少需要绑定一条事实依据。' : '正文内容过短，暂不适合提交。'}</span></div> : null}
+      {!canSubmit ? <div className="submission-hint"><Check size={15} /><span>{!verified ? '内容修改后必须重新核验事实与合规。' : blocking ? '存在阻断风险，修改后才能提交。' : !variant.claims.length ? '至少需要绑定一条事实依据。' : '正文内容过短，暂不适合提交。'}</span></div> : null}
     </div>
   )
 }

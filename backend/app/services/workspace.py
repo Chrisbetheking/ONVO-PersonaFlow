@@ -14,6 +14,7 @@ from uuid import uuid4
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 WORKSPACE_FILE = DATA_DIR / "workspace.json"
 ADVISORS_FILE = DATA_DIR / "advisors.json"
+ENTERPRISE_FILE = DATA_DIR / "enterprise.json"
 WORKSPACE_TTL_SECONDS = max(300, int(os.getenv("WORKSPACE_TTL_SECONDS", "21600")))
 WORKSPACE_CLEANUP_INTERVAL_SECONDS = max(30, int(os.getenv("WORKSPACE_CLEANUP_INTERVAL_SECONDS", "300")))
 MAX_WORKSPACES = max(20, int(os.getenv("MAX_WORKSPACES", "5000")))
@@ -39,6 +40,12 @@ def _normalize_review(item: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("decision_reason", "")
     normalized.setdefault("decision_at", "")
     normalized.setdefault("change_log", [])
+    normalized.setdefault("verification_status", "verified")
+    normalized.setdefault("compliance_status", "verified")
+    normalized.setdefault("knowledge_version", "onvo-cn-2026.07.18")
+    normalized.setdefault("verification_version", 1)
+    normalized.setdefault("verified_at", normalized.get("submitted_at", ""))
+    normalized.setdefault("version_history", [])
     return normalized
 
 
@@ -52,6 +59,9 @@ def _normalize_campaign(item: dict[str, Any]) -> dict[str, Any]:
 def _load_initial() -> dict[str, Any]:
     state = _read_json(WORKSPACE_FILE)
     state["advisors"] = _read_json(ADVISORS_FILE)
+    enterprise = _read_json(ENTERPRISE_FILE)
+    for key, value in enterprise.items():
+        state.setdefault(key, value)
     state.setdefault("drafts", [])
     state["reviews"] = [_normalize_review(item) for item in state.get("reviews", [])]
     state["campaigns"] = [_normalize_campaign(item) for item in state.get("campaigns", [])]
@@ -59,6 +69,49 @@ def _load_initial() -> dict[str, Any]:
 
 
 _INITIAL_STATE = _load_initial()
+
+_ENTERPRISE_OBJECT_LISTS = [
+    "hotspots", "knowledge_items", "knowledge_impacts", "sync_events", "customer_profiles",
+    "promises", "quality_signals", "coaching_plans", "best_practices", "customer_risks",
+    "experiments", "demo_scenarios", "notifications", "approvals", "revalidation_tasks", "audit_log",
+]
+
+
+def _stamp_object_metadata(item: dict[str, Any], workspace_id: str, *, source_type: str = "demo_template") -> None:
+    created_at = str(item.get("created_at") or item.get("updated_at") or "2026-07-19T09:00:00")
+    item["workspace_id"] = workspace_id
+    item.setdefault("created_at", created_at)
+    item.setdefault("updated_at", created_at)
+    item.setdefault("source_type", str(item.get("source") or source_type))
+    item.setdefault("demo_flag", True)
+    item.setdefault("created_by", str(item.get("actor") or item.get("owner") or "system_demo"))
+    item.setdefault("version", 1)
+
+
+def _stamp_enterprise_state(state: dict[str, Any], workspace_id: str) -> None:
+    for key in _ENTERPRISE_OBJECT_LISTS:
+        for item in state.get(key, []) or []:
+            if not isinstance(item, dict):
+                continue
+            _stamp_object_metadata(item, workspace_id, source_type=f"{key}_demo")
+            if key == "hotspots":
+                for evidence in item.get("evidence", []) or []:
+                    if isinstance(evidence, dict):
+                        _stamp_object_metadata(evidence, workspace_id, source_type="hotspot_evidence_demo")
+            if key == "knowledge_items":
+                for version in item.get("versions", []) or []:
+                    if isinstance(version, dict):
+                        _stamp_object_metadata(version, workspace_id, source_type="knowledge_version_demo")
+            if key == "customer_profiles":
+                for action in item.get("next_best_actions", []) or []:
+                    if isinstance(action, dict):
+                        _stamp_object_metadata(action, workspace_id, source_type="next_best_action_demo")
+
+
+def _new_workspace_state(workspace_id: str) -> dict[str, Any]:
+    state = copy.deepcopy(_INITIAL_STATE)
+    _stamp_enterprise_state(state, workspace_id)
+    return state
 
 
 def normalize_workspace_id(value: str | None) -> str:
@@ -95,7 +148,7 @@ class WorkspaceStore:
         self._cleanup_locked(now)
         entry = self._entries.get(workspace_id)
         if entry is None:
-            entry = {"state": copy.deepcopy(_INITIAL_STATE), "last_access": now}
+            entry = {"state": _new_workspace_state(workspace_id), "last_access": now}
             self._entries[workspace_id] = entry
         else:
             entry["last_access"] = now
@@ -107,13 +160,15 @@ class WorkspaceStore:
 
     def reset(self, workspace_id: str) -> dict[str, Any]:
         with self._lock:
-            self._entries[workspace_id] = {"state": copy.deepcopy(_INITIAL_STATE), "last_access": time.monotonic()}
+            self._entries[workspace_id] = {"state": _new_workspace_state(workspace_id), "last_access": time.monotonic()}
             return copy.deepcopy(self._entries[workspace_id]["state"])
 
     def mutate(self, workspace_id: str, mutation: Callable[[dict[str, Any]], Any]) -> Any:
         with self._lock:
             state = self._entry_locked(workspace_id)["state"]
-            return copy.deepcopy(mutation(state))
+            result = mutation(state)
+            _stamp_enterprise_state(state, workspace_id)
+            return copy.deepcopy(result)
 
     def active_count(self) -> int:
         with self._lock:
@@ -134,6 +189,44 @@ def snapshot(workspace_id: str) -> dict[str, Any]:
 
 def workspace_stats() -> dict[str, int]:
     return {"active_workspaces": _STORE.active_count(), "ttl_seconds": WORKSPACE_TTL_SECONDS}
+
+
+def mutate_state(workspace_id: str, mutation: Callable[[dict[str, Any]], Any]) -> Any:
+    """Thread-safe workspace mutation used by enterprise services."""
+    return _STORE.mutate(workspace_id, mutation)
+
+
+def append_audit(
+    workspace_id: str,
+    *,
+    actor: str,
+    role: str,
+    action: str,
+    object_type: str,
+    object_id: str,
+    before: Any = None,
+    after: Any = None,
+    knowledge_version: str = "",
+    demo_flag: bool = True,
+) -> dict[str, Any]:
+    def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        event = {
+            "id": f"audit-{uuid4().hex[:10]}",
+            "actor": actor,
+            "role": role,
+            "action": action,
+            "object_type": object_type,
+            "object_id": object_id,
+            "before": copy.deepcopy(before),
+            "after": copy.deepcopy(after),
+            "knowledge_version": knowledge_version,
+            "demo_flag": demo_flag,
+            "workspace_id": workspace_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        state.setdefault("audit_log", []).insert(0, event)
+        return event
+    return _STORE.mutate(workspace_id, mutation)
 
 
 def advisors(workspace_id: str) -> list[dict[str, Any]]:
@@ -204,10 +297,18 @@ def add_followup_event(workspace_id: str, customer_id: str, event: dict[str, Any
         for item in state["followups"]:
             if item["customer_id"] != customer_id:
                 continue
+            advisor = next((advisor for advisor in state.get("advisors", []) if advisor.get("id") == item.get("advisor_id")), None)
+            event_type = str(event.get("type") or "advisor_note")
+            if event_type == "customer_message":
+                actor = item.get("customer_name") or "客户"
+            elif event_type in {"advisor_note", "advisor_sent", "test_drive_booked", "promise_created", "promise_completed"}:
+                actor = (advisor or {}).get("name") or "顾问"
+            else:
+                actor = str(event.get("actor") or (advisor or {}).get("name") or "系统")
             stored = {
                 "id": f"event-{uuid4().hex[:8]}",
-                "type": str(event.get("type") or "advisor_note"),
-                "actor": str(event.get("actor") or "顾问"),
+                "type": event_type,
+                "actor": actor,
                 "time": datetime.now().strftime("今天 %H:%M"),
                 "title": str(event.get("title") or "新增记录"),
                 "content": str(event.get("content") or "").strip(),
@@ -277,11 +378,24 @@ def decide_review(workspace_id: str, review_id: str, decision: str, reason: str,
             cta = str(changes.get("call_to_action") if changes.get("call_to_action") is not None else before["call_to_action"])
             before_risks = copy.deepcopy(item.get("risk_annotations", []))
             risks = copy.deepcopy(changes.get("risk_annotations")) if changes.get("risk_annotations") is not None else before_risks
+            content_changed = body != before["body"] or cta != before["call_to_action"] or risks != before_risks
+            if content_changed:
+                item["reviewed_body"] = body
+                item["reviewed_call_to_action"] = cta
+                item["risk_annotations"] = risks
+                item["verification_status"] = "needs_revalidation"
+                item["compliance_status"] = "needs_revalidation"
+                item["evidence_status"] = "需要重新核验"
+                item.setdefault("version_history", []).append({
+                    "type": "manager_edit",
+                    "at": datetime.now().isoformat(timespec="seconds"),
+                    "body": body,
+                    "call_to_action": cta,
+                })
+            if decision == "approved" and item.get("verification_status") != "verified":
+                raise ValueError("经理修改后的内容必须重新核验，不能直接批准")
             item["status"] = decision
             item["decision_reason"] = reason.strip()
-            item["reviewed_body"] = body
-            item["reviewed_call_to_action"] = cta
-            item["risk_annotations"] = risks
             item["decision_at"] = datetime.now().isoformat(timespec="seconds")
             item.setdefault("change_log", []).append({
                 "at": item["decision_at"],
@@ -290,6 +404,12 @@ def decide_review(workspace_id: str, review_id: str, decision: str, reason: str,
                 "body_changed": body != before["body"],
                 "cta_changed": cta != before["call_to_action"],
                 "risk_annotations_changed": risks != before_risks,
+            })
+            state.setdefault("audit_log", []).insert(0, {
+                "id": f"audit-{uuid4().hex[:10]}", "actor": "门店经理 Demo", "role": "门店经理空间",
+                "action": "批准内容" if decision == "approved" else "退回内容", "object_type": "review", "object_id": review_id,
+                "before": before, "after": {"status": decision, "reason": reason}, "knowledge_version": item.get("knowledge_version", ""),
+                "demo_flag": True, "workspace_id": workspace_id, "created_at": item["decision_at"],
             })
             return item
         raise KeyError(f"Unknown review_id: {review_id}")
@@ -364,6 +484,12 @@ def save_draft(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "risk_annotations": copy.deepcopy(payload.get("risk_annotations") or []),
         "evidence": copy.deepcopy(payload.get("evidence") or []),
         "status": str(payload.get("status") or "draft"),
+        "verification_status": str(payload.get("verification_status") or "verified"),
+        "compliance_status": str(payload.get("compliance_status") or payload.get("verification_status") or "verified"),
+        "knowledge_version": str(payload.get("knowledge_version") or "onvo-cn-2026.07.18"),
+        "verification_version": int(payload.get("verification_version") or 1),
+        "verified_at": str(payload.get("verified_at") or datetime.now().isoformat(timespec="seconds")),
+        "version_history": copy.deepcopy(payload.get("version_history") or []),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -380,6 +506,8 @@ def save_draft(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def submit_review(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if str(payload.get("verification_status") or "verified") != "verified":
+        raise ValueError("内容已发生变化，必须重新核验后才能提交审核")
     draft = save_draft(workspace_id, {**payload, "status": "submitted"})
     review = _normalize_review({
         "id": f"review-{uuid4().hex[:8]}",
@@ -402,6 +530,12 @@ def submit_review(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "evidence_status": str(payload.get("evidence_status") or "已绑定"),
         "submitted_at": datetime.now().strftime("今天 %H:%M"),
         "decision_reason": "",
+        "verification_status": draft.get("verification_status", "verified"),
+        "compliance_status": draft.get("compliance_status", "verified"),
+        "knowledge_version": draft.get("knowledge_version", "onvo-cn-2026.07.18"),
+        "verification_version": draft.get("verification_version", 1),
+        "verified_at": draft.get("verified_at", ""),
+        "version_history": draft.get("version_history", []),
     })
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
