@@ -58,7 +58,7 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
         content: message.trim(),
         status: isCustomer ? 'received' : 'completed',
         source_label: isCustomer ? '人工补录' : '授权沟通 Demo',
-        sync_status: dataMode === 'fallback' ? '本地工作区' : '演示同步完成',
+        sync_status: dataMode === 'local_demo' ? '本地工作区' : '演示同步完成',
       })
       setMessage('')
       showToast(isCustomer ? '客户回复已加入会话并更新记忆' : '顾问发送记录已加入会话')
@@ -68,7 +68,7 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
   async function convertEvent(event: FollowupEvent, action: 'memory' | 'concern' | 'promise' | 'next_action' | 'manager_help') {
     const note = action === 'promise' ? '根据该消息在 24 小时内完成确认' : ''
     try {
-      if (dataMode === 'fallback') {
+      if (dataMode === 'local_demo') {
         const now = new Date().toISOString()
         updateEnterpriseLocal(current => {
           if (action === 'promise') return { ...current, promises: [{ id: `local-promise-${Date.now()}`, customer_id: followup.customer_id, advisor_id: followup.advisor_id, original_message: event.content, source_event_id: event.id, commitment: note, due_at: '24 小时内', completion_criteria: '顾问提交完成备注', status: 'pending_confirmation', source: '客户沟通转承诺 · 本地演示', created_at: now, remind_at: '', overdue: false, manager_attention: false, evidence: [], demo_flag: true }, ...current.promises] }
@@ -99,7 +99,7 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
       const content = `${bookingTime} 到店。携带物品：${items.join('、') || '未填写'}。${bookingNotes}`
       await addFollowupEvent(followup.customer_id, {
         type: 'test_drive_booked', actor: advisor.name, title: '已预约家庭场景试驾', content,
-        scheduled_at: bookingTime, items, notes: bookingNotes, status: 'completed', source_label: '到店记录', sync_status: dataMode === 'fallback' ? '本地演示' : '工作区已记录',
+        scheduled_at: bookingTime, items, notes: bookingNotes, status: 'completed', source_label: '到店记录', sync_status: dataMode === 'local_demo' ? '本地演示' : '工作区已记录',
       })
       setBookingOpen(false); showToast(`试驾预约已由${advisor.name}记录`)
     } catch (caught) { setError(caught instanceof Error ? caught.message : '试驾预约记录失败') } finally { setBooking(false) }
@@ -134,7 +134,7 @@ export function FollowUpPage({ params }: { params: URLSearchParams }) {
         <label className="field-label">体验地点<div className="input-with-icon"><MapPin size={16}/><input value={advisor?.store || ''} readOnly/></div></label>
         <label className="field-label">携带物品<input data-testid="booking-items" value={bookingItems} onChange={event => setBookingItems(event.target.value)}/></label>
         <label className="field-label">体验备注<textarea data-testid="booking-notes" value={bookingNotes} onChange={event => setBookingNotes(event.target.value)}/></label>
-        <small className="dialog-boundary">{dataMode === 'fallback' ? '当前为本地演示预约，不会写入真实试驾系统。' : '当前记录保存在此浏览器工作区；接入真实试驾系统后可替换为预约接口。'}</small>
+        <small className="dialog-boundary">{dataMode === 'local_demo' ? '当前为本地演示预约，不会写入真实试驾系统。' : '当前记录保存在此浏览器工作区；接入真实试驾系统后可替换为预约接口。'}</small>
       </Dialog>
     </section>
   )

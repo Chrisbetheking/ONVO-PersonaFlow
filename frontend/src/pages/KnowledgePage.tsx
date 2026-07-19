@@ -3,6 +3,7 @@ import { ArrowRight, BellRing, GitCompareArrows, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { useApp } from '../app/AppContext'
 import { Button, EmptyState, StatusPill } from '../shared/ui'
+import { statusLabel } from '../shared/display'
 import type { KnowledgeImpact, KnowledgeItem } from '../types'
 
 const changes = [
@@ -24,7 +25,7 @@ export function KnowledgePage() {
   async function simulate() {
     setWorking(true)
     try {
-      if (dataMode === 'fallback') {
+      if (dataMode === 'local_demo') {
         const now = new Date().toISOString()
         const target = selected || items[0]
         if (!target) return
@@ -48,7 +49,7 @@ export function KnowledgePage() {
   }
 
   async function objectAction(currentImpact: KnowledgeImpact, objectId: string, action: string) {
-    if (dataMode === 'fallback') updateEnterpriseLocal(current=>({...current,knowledge_impacts:current.knowledge_impacts.map(item=>item.id===currentImpact.id?{...item,objects:item.objects.map(obj=>obj.id===objectId?{...obj,status:action}:obj)}:item)}))
+    if (dataMode === 'local_demo') updateEnterpriseLocal(current=>({...current,knowledge_impacts:current.knowledge_impacts.map(item=>item.id===currentImpact.id?{...item,objects:item.objects.map(obj=>obj.id===objectId?{...obj,status:action}:obj)}:item)}))
     else { await api.impactAction(currentImpact.id,objectId,action,'人工确认'); await refreshWorkspace() }
     showToast('影响对象处理状态已更新')
   }
@@ -59,7 +60,7 @@ export function KnowledgePage() {
     <main className="enterprise-detail-pane">
       <header className="detail-heading"><div><p className="eyebrow">{selected.demo_flag?'演示知识':'企业知识'}</p><h2>{selected.title}</h2><p>{selected.source} · {selected.updated_at}</p></div><StatusPill tone="success">v{selected.version}</StatusPill></header>
       <article className="knowledge-body">{selected.content.split('\n').map((line,i)=><p key={i}>{line}</p>)}</article>
-      <section className="version-history"><div className="section-heading"><strong>版本记录</strong><span>{selected.versions.length}</span></div>{selected.versions.map(version=><div key={version.id}><span>v{version.version}</span><strong>{version.status}</strong><small>{version.created_at} · {version.source}</small></div>)}</section>
+      <section className="version-history"><div className="section-heading"><strong>版本记录</strong><span>{selected.versions.length}</span></div>{selected.versions.map(version=><div key={version.id}><span>v{version.version}</span><strong>{statusLabel(version.status)}</strong><small>{version.created_at} · {version.source}</small></div>)}</section>
       <div className="demo-notice">当前使用 Demo Adapter 模拟飞书知识变化，未连接真实飞书企业应用。</div>
     </main>
     <aside className="enterprise-action-pane">

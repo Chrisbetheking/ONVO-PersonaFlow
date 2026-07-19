@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import mean
 from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,7 @@ from .services.compliance import check_content
 from .services.content_engine import generate_content
 from .services.lead_engine import analyze as analyze_leads
 from .services.llm_provider import enhance_result, is_enabled, provider_status, rewrite_text
+from .services.quota import QUOTA_MANAGER, ModelAccessDecision
 from .services.verification import issue_verification_token
 from .services.store import get_vehicle, vehicles
 from .services.enterprise import (
@@ -48,10 +49,18 @@ from .services.workspace import (
     update_opportunity,
     workspace_stats,
     mutate_state,
+    append_audit,
 )
 
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.3"
+API_SCHEMA_VERSION = "1"
 KNOWLEDGE_VERSION = "onvo-cn-2026.07.18"
+BUILD_TIME = os.getenv("BUILD_TIME", "").strip() or datetime.now(timezone.utc).isoformat(timespec="seconds")
+GIT_COMMIT = next((
+    os.getenv(name, "").strip()
+    for name in ("RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA", "GIT_COMMIT", "SOURCE_VERSION")
+    if os.getenv(name, "").strip()
+), "unknown")
 
 app = FastAPI(
     title="蔚见 API",
@@ -78,6 +87,55 @@ def resolve_workspace_id(
 
 
 WorkspaceId = Annotated[str, Depends(resolve_workspace_id)]
+DemoToken = Annotated[str | None, Header(alias="X-Demo-Token")]
+
+
+def _client_ip(request: Request) -> str:
+    # Render and common reverse proxies append the edge-observed client address.
+    # Use the right-most non-empty value so a caller cannot bypass the quota by
+    # prepending an arbitrary X-Forwarded-For entry.
+    forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    if forwarded:
+        return forwarded[-1]
+    return request.client.host if request.client else "unknown"
+
+
+def _model_access(
+    *,
+    request: Request,
+    workspace_id: str,
+    token: str | None,
+    units: int = 1,
+) -> ModelAccessDecision:
+    return QUOTA_MANAGER.check(
+        workspace_id=workspace_id,
+        client_ip=_client_ip(request),
+        token=token,
+        units=units,
+    )
+
+
+def _raise_quota_error(decision: ModelAccessDecision) -> None:
+    if decision.status_code != 429:
+        return
+    raise HTTPException(
+        status_code=429,
+        detail=decision.reason,
+        headers={"Retry-After": str(decision.retry_after or 60)},
+    )
+
+
+def _audit_model_access(workspace_id: str, decision: ModelAccessDecision, *, object_id: str) -> None:
+    append_audit(
+        workspace_id,
+        actor="公开演示网关",
+        role="系统治理",
+        action=f"模型调用：{decision.mode}",
+        object_type="model_call",
+        object_id=object_id,
+        after={"allowed": decision.allowed, "reason": decision.reason, "status_code": decision.status_code},
+        demo_flag=True,
+    )
 
 
 class GenerateRequest(BaseModel):
@@ -425,8 +483,13 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "mode": "demo-adapter",
         "version": APP_VERSION,
+        "app_version": APP_VERSION,
+        "git_commit": GIT_COMMIT,
+        "build_time": BUILD_TIME,
+        "api_schema_version": API_SCHEMA_VERSION,
         "knowledge_version": KNOWLEDGE_VERSION,
         "provider": provider_status(),
+        "public_demo_quota": QUOTA_MANAGER.stats(),
         "workspace_store": workspace_stats(),
     }
 
@@ -670,44 +733,64 @@ def demo_reset(workspace_id: WorkspaceId) -> dict[str, Any]:
 
 
 @app.post("/api/content/generate")
-async def content_generate(request: GenerateRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    advisor = _safe_get_advisor(workspace_id, request.advisor_id)
-    vehicle = _safe_get_vehicle(request.vehicle_id)
-    customer_context = request.customer_context
-    if request.opportunity_id and not customer_context:
+async def content_generate(
+    payload: GenerateRequest,
+    http_request: Request,
+    workspace_id: WorkspaceId,
+    x_demo_token: DemoToken = None,
+) -> dict[str, Any]:
+    advisor = _safe_get_advisor(workspace_id, payload.advisor_id)
+    vehicle = _safe_get_vehicle(payload.vehicle_id)
+    customer_context = payload.customer_context
+    if payload.opportunity_id and not customer_context:
         try:
-            customer_context = get_opportunity(workspace_id, request.opportunity_id).get("customer")
+            customer_context = get_opportunity(workspace_id, payload.opportunity_id).get("customer")
         except KeyError:
             customer_context = None
     result = generate_content(
         advisor=advisor,
         vehicle=vehicle,
-        campaign_name=request.campaign_name,
-        campaign_brief=request.campaign_brief,
-        platforms=request.platforms,
+        campaign_name=payload.campaign_name,
+        campaign_brief=payload.campaign_brief,
+        platforms=payload.platforms,
         customer_context=customer_context,
-        opportunity_id=request.opportunity_id,
+        opportunity_id=payload.opportunity_id,
     )
     result["audit"].update({"ai_used": False, "provider": "规则引擎", "model": "grounded-template"})
 
-    if request.use_llm:
-        if is_enabled():
+    if payload.use_llm and is_enabled():
+        decision = _model_access(
+            request=http_request,
+            workspace_id=workspace_id,
+            token=x_demo_token,
+            units=1,
+        )
+        _audit_model_access(workspace_id, decision, object_id=result.get("task_id", "content-generate"))
+        _raise_quota_error(decision)
+        if decision.allowed:
             try:
                 result = await enhance_result(
                     result,
                     advisor=advisor,
                     vehicle=vehicle,
-                    campaign_name=request.campaign_name,
-                    campaign_brief=request.campaign_brief,
+                    campaign_name=payload.campaign_name,
+                    campaign_brief=payload.campaign_brief,
                     customer_context=customer_context,
                 )
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 result["audit"]["ai_warning"] = f"模型调用失败，已保留可审核的基础版本：{exc}"
         else:
-            result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
+            result["audit"]["ai_warning"] = decision.reason
+        result["audit"]["quota_mode"] = decision.mode
+        result["audit"]["quota_notice"] = decision.reason
+    elif payload.use_llm:
+        result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
+        result["audit"]["quota_mode"] = "rules"
+
     for variant in result.get("variants", []):
         _stamp_variant_verification(
-            result.get("task_id", ""), variant,
+            result.get("task_id", ""),
+            variant,
             result.get("audit", {}).get("knowledge_version", KNOWLEDGE_VERSION),
             result.get("audit", {}).get("generated_at", ""),
         )
@@ -715,57 +798,124 @@ async def content_generate(request: GenerateRequest, workspace_id: WorkspaceId) 
 
 
 @app.post("/api/content/rewrite")
-async def content_rewrite(request: RewriteRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    advisor = _safe_get_advisor(workspace_id, request.advisor_id)
-    vehicle = _safe_get_vehicle(request.vehicle_id)
+async def content_rewrite(
+    payload: RewriteRequest,
+    http_request: Request,
+    workspace_id: WorkspaceId,
+    x_demo_token: DemoToken = None,
+) -> dict[str, Any]:
+    advisor = _safe_get_advisor(workspace_id, payload.advisor_id)
+    vehicle = _safe_get_vehicle(payload.vehicle_id)
+    decision = _model_access(
+        request=http_request,
+        workspace_id=workspace_id,
+        token=x_demo_token,
+        units=1,
+    ) if is_enabled() else ModelAccessDecision(False, "尚未配置可用的大模型，已使用规则改写。", mode="rules")
+    _audit_model_access(workspace_id, decision, object_id="content-rewrite")
+    _raise_quota_error(decision)
     try:
-        return await rewrite_text(
-            request.text,
-            instruction=request.instruction,
+        result = await rewrite_text(
+            payload.text,
+            instruction=payload.instruction,
             advisor=advisor,
             vehicle=vehicle,
-            customer_context=request.customer_context,
+            customer_context=payload.customer_context,
+            allow_model=decision.allowed,
         )
+        result["quota_mode"] = decision.mode
+        result["quota_notice"] = decision.reason
+        return result
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"局部改写失败：{exc}") from exc
 
 
 @app.post("/api/content/batch-generate")
-async def content_batch_generate(request: BatchGenerateRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    if len(set(request.advisor_ids)) != len(request.advisor_ids):
-        raise HTTPException(status_code=422, detail="advisor_ids must not contain duplicates")
-    vehicle = _safe_get_vehicle(request.vehicle_id)
+async def content_batch_generate(
+    payload: BatchGenerateRequest,
+    http_request: Request,
+    workspace_id: WorkspaceId,
+    x_demo_token: DemoToken = None,
+) -> dict[str, Any]:
+    if len(set(payload.advisor_ids)) != len(payload.advisor_ids):
+        raise HTTPException(status_code=422, detail="顾问列表不能包含重复项。")
+    task_count = len(payload.advisor_ids) * len(payload.platforms)
+    if QUOTA_MANAGER.public_demo_mode() and task_count > QUOTA_MANAGER.batch_limit():
+        raise HTTPException(
+            status_code=422,
+            detail=f"公开演示单次批量任务最多 {QUOTA_MANAGER.batch_limit()} 项，当前为 {task_count} 项。",
+        )
+
+    model_allowed = False
+    quota_notice = "批量任务使用规则引擎。"
+    quota_mode = "rules"
+    if payload.use_llm and is_enabled():
+        decision = _model_access(
+            request=http_request,
+            workspace_id=workspace_id,
+            token=x_demo_token,
+            units=task_count,
+        )
+        _audit_model_access(workspace_id, decision, object_id=payload.campaign_id or "batch-generate")
+        _raise_quota_error(decision)
+        model_allowed = decision.allowed
+        quota_notice = decision.reason
+        quota_mode = decision.mode
+
+    vehicle = _safe_get_vehicle(payload.vehicle_id)
     results: list[dict[str, Any]] = []
     warnings: list[str] = []
     tasks: list[dict[str, Any]] = []
-    campaign_id = request.campaign_id or f"ad-hoc-{uuid4().hex[:8]}"
+    campaign_id = payload.campaign_id or f"ad-hoc-{uuid4().hex[:8]}"
 
-    for advisor_id in request.advisor_ids:
+    if payload.use_llm and not model_allowed:
+        warnings.append(quota_notice)
+
+    for advisor_id in payload.advisor_ids:
         advisor = _safe_get_advisor(workspace_id, advisor_id)
         try:
             result = generate_content(
                 advisor=advisor,
                 vehicle=vehicle,
-                campaign_name=request.campaign_name,
-                campaign_brief=request.campaign_brief,
-                platforms=request.platforms,
+                campaign_name=payload.campaign_name,
+                campaign_brief=payload.campaign_brief,
+                platforms=payload.platforms,
             )
-            result["audit"].update({"ai_used": False, "provider": "规则引擎", "model": "grounded-template"})
-            if request.use_llm and is_enabled():
+            result["audit"].update({
+                "ai_used": False,
+                "provider": "规则引擎",
+                "model": "grounded-template",
+                "quota_mode": quota_mode,
+                "quota_notice": quota_notice,
+            })
+            if model_allowed:
                 try:
                     result = await enhance_result(
                         result,
                         advisor=advisor,
                         vehicle=vehicle,
-                        campaign_name=request.campaign_name,
-                        campaign_brief=request.campaign_brief,
+                        campaign_name=payload.campaign_name,
+                        campaign_brief=payload.campaign_brief,
                     )
                 except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                     warnings.append(f"{advisor['name']}：{exc}")
             for variant in result.get("variants", []):
-                _stamp_variant_verification(result["task_id"], variant, result["audit"].get("knowledge_version", KNOWLEDGE_VERSION), result["audit"].get("generated_at", ""))
+                _stamp_variant_verification(
+                    result["task_id"],
+                    variant,
+                    result["audit"].get("knowledge_version", KNOWLEDGE_VERSION),
+                    result["audit"].get("generated_at", ""),
+                )
             results.append(result)
-            tasks.extend(_task_from_variant(campaign_id=campaign_id, result=result, variant=variant, advisor=advisor) for variant in result["variants"])
+            tasks.extend(
+                _task_from_variant(
+                    campaign_id=campaign_id,
+                    result=result,
+                    variant=variant,
+                    advisor=advisor,
+                )
+                for variant in result["variants"]
+            )
         except Exception as exc:
             warnings.append(f"{advisor['name']}：{exc}")
             tasks.extend({
@@ -780,7 +930,7 @@ async def content_batch_generate(request: BatchGenerateRequest, workspace_id: Wo
                 "generated_at": "",
                 "result": None,
                 "review_id": "",
-            } for platform in request.platforms)
+            } for platform in payload.platforms)
 
     personalization_scores = [variant["personalization_score"] for result in results for variant in result["variants"]]
     compliance_scores = [variant["compliance_score"] for result in results for variant in result["variants"]]
@@ -791,19 +941,21 @@ async def content_batch_generate(request: BatchGenerateRequest, workspace_id: Wo
         "failed": sum(1 for task in tasks if task["status"] == "failed"),
     }
     campaign = None
-    if request.campaign_id:
+    if payload.campaign_id:
         try:
-            campaign = update_campaign_run(workspace_id, request.campaign_id, tasks)
+            campaign = update_campaign_run(workspace_id, payload.campaign_id, tasks)
         except KeyError:
             warnings.append("活动状态未更新：未找到对应 campaign_id")
     return {
         "batch_id": f"batch-{uuid4().hex[:12]}",
-        "advisor_count": len(request.advisor_ids),
+        "advisor_count": len(payload.advisor_ids),
         "variant_count": len(tasks),
         "results": results,
         "tasks": tasks,
         "campaign": campaign,
         "warnings": warnings,
+        "quota_mode": quota_mode,
+        "quota_notice": quota_notice,
         "summary": {
             **summary,
             "avg_personalization": round(mean(personalization_scores), 1) if personalization_scores else 0,
@@ -811,7 +963,6 @@ async def content_batch_generate(request: BatchGenerateRequest, workspace_id: Wo
             "human_review_required": 1,
         },
     }
-
 
 
 @app.post("/api/content/revalidate")

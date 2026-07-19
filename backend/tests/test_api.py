@@ -69,7 +69,11 @@ def test_health_and_anonymous_workspace_header() -> None:
     health = client.get("/api/health")
     workspace = client.get("/api/workspace")
     assert health.status_code == 200
-    assert health.json()["version"] == "0.4.1"
+    assert health.json()["version"] == "0.4.3"
+    assert health.json()["app_version"] == "0.4.3"
+    assert health.json()["api_schema_version"] == "1"
+    assert health.json()["git_commit"]
+    assert health.json()["build_time"]
     generated = workspace.headers.get("X-Workspace-Id")
     assert generated and generated.startswith("anon-")
     followup = client.get("/api/workspace", headers={"X-Workspace-Id": generated})
@@ -479,3 +483,75 @@ def test_title_and_cta_changes_require_fresh_signed_verification() -> None:
             "version_history": changed["version_history"],
         })
         assert response.status_code == 422
+
+
+def test_public_demo_model_quota_returns_429_and_audits(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.main as main_module
+    from app.services.quota import QUOTA_MANAGER
+
+    QUOTA_MANAGER.reset_for_tests()
+    monkeypatch.setenv("PUBLIC_DEMO_MODE", "true")
+    monkeypatch.setenv("PUBLIC_DEMO_TOKEN", "short-lived-test-token")
+    monkeypatch.setenv("PUBLIC_DEMO_MODEL_CALLS_PER_MINUTE", "1")
+    monkeypatch.setenv("PUBLIC_DEMO_MODEL_CALLS_PER_DAY", "5")
+    monkeypatch.setenv("PUBLIC_DEMO_MODEL_DAILY_BUDGET", "10")
+    monkeypatch.setattr(main_module, "is_enabled", lambda: True)
+
+    async def fake_enhance(result: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        result["audit"]["ai_used"] = True
+        result["audit"]["provider"] = "quota-test"
+        return result
+
+    monkeypatch.setattr(main_module, "enhance_result", fake_enhance)
+    headers = {**A, "X-Demo-Token": "short-lived-test-token", "X-Forwarded-For": "203.0.113.8"}
+    payload = generation_payload() | {"use_llm": True}
+    first = client.post("/api/content/generate", headers=headers, json=payload)
+    second = client.post("/api/content/generate", headers=headers, json=payload)
+    assert first.status_code == 200
+    assert first.json()["audit"]["quota_mode"] == "model"
+    assert second.status_code == 429
+    assert "频繁" in second.json()["detail"]
+    health = client.get("/api/health").json()
+    assert health["public_demo_quota"]["audit_entries"] >= 2
+    workspace = client.get("/api/workspace", headers=A).json()
+    assert any(item["object_type"] == "model_call" for item in workspace["enterprise"]["audit_log"])
+    QUOTA_MANAGER.reset_for_tests()
+
+
+def test_public_demo_batch_hard_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PUBLIC_DEMO_MODE", "true")
+    monkeypatch.setenv("PUBLIC_DEMO_BATCH_LIMIT", "2")
+    response = client.post("/api/content/batch-generate", headers=A, json={
+        "advisor_ids": ["advisor-hz-02"],
+        "vehicle_id": "l80",
+        "campaign_name": "批量限制测试",
+        "campaign_brief": "验证公开演示单次任务硬上限。",
+        "platforms": ["朋友圈", "小红书", "私聊跟进"],
+        "use_llm": False,
+    })
+    assert response.status_code == 422
+    assert "最多 2 项" in response.json()["detail"]
+
+
+def test_workspace_lists_are_bounded_and_eviction_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.workspace as workspace_module
+
+    monkeypatch.setattr(workspace_module, "MAX_AUDIT_EVENTS", 2)
+    monkeypatch.setattr(workspace_module, "MAX_NOTIFICATIONS", 2)
+    monkeypatch.setattr(workspace_module, "MAX_WORKSPACES", 2)
+    monkeypatch.setattr(workspace_module, "WORKSPACE_CLEANUP_INTERVAL_SECONDS", 0)
+    store = workspace_module.WorkspaceStore()
+
+    def grow(state: dict[str, Any]) -> None:
+        state["audit_log"] = [{"id": f"audit-{index}"} for index in range(5)]
+        state["notifications"] = [{"id": f"notice-{index}"} for index in range(5)]
+
+    store.mutate("bounded-workspace-1", grow)
+    bounded = store.snapshot("bounded-workspace-1")
+    assert len(bounded["audit_log"]) == 2
+    assert len(bounded["notifications"]) == 2
+    store.snapshot("bounded-workspace-2")
+    store.snapshot("bounded-workspace-3")
+    stats = store.stats()
+    assert stats["active_workspaces"] <= 2
+    assert stats["evicted_total"] >= 1

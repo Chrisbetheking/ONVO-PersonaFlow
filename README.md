@@ -2,7 +2,7 @@
 
 > 把企业知识、客户沟通和门店人工判断连成可追溯的经营闭环；既帮助顾问推进客户下一步，也帮助组织及时发现知识变化和服务质量信号。
 
-ONVO PersonaFlow v0.4.2 延续 v0.3.x 的今日机会、内容作战台、跟进、审核和批量任务，在同一 React / TypeScript / Vite + FastAPI 工程中增加企业知识、热点雷达、客户 360、承诺台账、质量辅导、优秀案例和 Demo Adapter。它不是自动处罚系统，也不把演示数据伪装成生产数据。
+ONVO PersonaFlow v0.4.3 延续 v0.3.x 的今日机会、内容作战台、跟进、审核和批量任务，在同一 React / TypeScript / Vite + FastAPI 工程中增加企业知识、热点雷达、客户 360、承诺台账、质量辅导、优秀案例和 Demo Adapter。它不是自动处罚系统，也不把演示数据伪装成生产数据。
 
 ## 三个闭环
 
@@ -21,18 +21,21 @@ ONVO PersonaFlow v0.4.2 延续 v0.3.x 的今日机会、内容作战台、跟进
 公开演示允许同一身份切换三个空间，并明确标记“角色演示”；这不代表已实现企业 RBAC。
 
 
-## v0.4.2 UI/UX 专项升级
+## v0.4.3 稳定性与部署一致性
 
-- 保留顾问、门店经理和总部运营三个空间及全部既有业务能力，不新增业务范围；
-- 建立统一设计 Token、共享按钮、状态、标签、浮层、命令栏和可访问焦点规则；
-- 今日机会、客户沟通、内容作战台、承诺、客户档案和顾问画像改为高密度列表—详情—上下文工作台；
-- 每个业务状态只保留一个主操作，次级操作进入菜单，Demo 工具与真实业务操作分区；
-- 1366×768 下不产生页面级横向溢出，客户上下文和事实合规侧栏可折叠；
-- stale 内容不显示绿色“已核验”，提交、发送和批准继续遵守原有服务端核验阻断。
+- 前后端版本统一为 0.4.3，健康接口同时返回 Git Commit、构建时间和 API schema；
+- 前端校验 API schema，避免新前端连接旧后端后静默出错；
+- 角色空间使用乐观切换，立即更新本地状态和路由，审计在后台执行；
+- 网络状态拆分为在线、在线数据暂时陈旧和用户明确选择的本地演示；
+- 客户沟通时间线使用稳定网格和最小消息宽度，避免中文被压成竖列；
+- 角色入口只保留左侧空间切换器，收起导航时隐藏品牌文案；
+- 内部枚举通过集中映射显示为中文；
+- 公开 Demo 默认使用规则引擎，模型调用受短期 Token、IP + workspace 限流和每日预算保护；
+- CI 新增 lint、format check，另设生产 Smoke 工作流核对 Vercel、Render Commit 与生产截图。
 
 ## 90 秒演示路径
 
-1. 在右上角切换到“总部运营空间”，打开“知识中心”。
+1. 在左侧空间切换器切换到“总部运营空间”，打开“知识中心”。
 2. 点击“模拟飞书知识变更”，查看新知识版本、diff、影响对象和重新核验任务。
 3. 切换“顾问空间”，进入内容作战台；编辑正文后，事实与合规状态立即变为“需要重新核验”，提交被禁用。
 4. 执行重新核验后提交审核。
@@ -167,6 +170,8 @@ cd ../frontend
 npm ci
 npm run typecheck
 npm test
+npm run lint
+npm run format:check
 npx playwright install --with-deps chromium
 npm run test:e2e
 npm audit --audit-level=moderate
@@ -175,7 +180,7 @@ cd ..
 python3 scripts/release_integrity.py
 ```
 
-CI 执行同样的检查，并在 Playwright 失败时上传 `playwright-report` 和 `test-results`。
+CI 执行同样的检查，并在 Playwright 失败时上传 `playwright-report` 和 `test-results`。部署完成后，由独立 Production Smoke 工作流核对线上版本、Commit、角色路由和生产截图。
 
 ## 当前限制与生产接入
 
@@ -198,3 +203,5 @@ CI 执行同样的检查，并在 Playwright 失败时上传 `playwright-report`
 - [RELEASE_INTEGRITY_REPORT.md](./RELEASE_INTEGRITY_REPORT.md)：发布一致性检查。
 - [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)：v0.4.2 设计 Token、组件和工作台规则。
 - [UI_REVIEW.md](./UI_REVIEW.md)：逐页布局、交互、响应式和遗留问题。
+- [SECURITY_AND_QUOTA.md](./SECURITY_AND_QUOTA.md)：公开 Demo 模型费用保护和 Workspace 资源边界。
+- [PRODUCTION_SMOKE_REPORT.md](./PRODUCTION_SMOKE_REPORT.md)：生产验证状态、工作流与通过标准。

@@ -3,6 +3,7 @@ import { BookOpenCheck, Building2, Share2 } from 'lucide-react'
 import { api } from '../api'
 import { useApp } from '../app/AppContext'
 import { Button, EmptyState, StatusPill } from '../shared/ui'
+import { statusLabel } from '../shared/display'
 
 export function BestPracticesPage() {
   const { workspace, dataMode, refreshWorkspace, updateEnterpriseLocal, showToast } = useApp()
@@ -15,7 +16,7 @@ export function BestPracticesPage() {
     if (!selected) return
     setWorking('publish')
     try {
-      if (dataMode === 'fallback') {
+      if (dataMode === 'local_demo') {
         updateEnterpriseLocal(current => ({
           ...current,
           best_practices: current.best_practices.map(item => item.id === selected.id ? {
@@ -37,7 +38,7 @@ export function BestPracticesPage() {
     if (!selected) return
     setWorking(value)
     try {
-      if (dataMode === 'fallback') {
+      if (dataMode === 'local_demo') {
         updateEnterpriseLocal(current => ({
           ...current,
           best_practices: current.best_practices.map(item => item.id === selected.id ? value === 'training_reference' ? {
@@ -83,8 +84,8 @@ export function BestPracticesPage() {
         <Button data-testid="best-practice-training" variant="secondary" loading={working === 'training_reference'} disabled={selected.status !== 'published' || selected.training_status === 'ready'} onClick={() => void action('training_reference')}><Share2 size={16}/>转为培训参考</Button>
         <Button data-testid="best-practice-cross-store" variant="secondary" loading={working === 'cross_store_publish'} disabled={selected.status !== 'published' || selected.cross_store_status === 'published_to_selected_stores'} onClick={() => void action('cross_store_publish')}><Building2 size={16}/>发布到选定门店</Button>
       </section>
-      {selected.training_status ? <section><strong>培训状态</strong><p>{selected.training_status}</p></section> : null}
-      {selected.cross_store_status ? <section><strong>跨门店采纳</strong><p>{selected.cross_store_status}</p><small>{selected.target_stores?.join('、')} · {selected.adoption_status}</small></section> : null}
+      {selected.training_status ? <section><strong>培训状态</strong><p>{statusLabel(selected.training_status)}</p></section> : null}
+      {selected.cross_store_status ? <section><strong>跨门店采纳</strong><p>{statusLabel(selected.cross_store_status)}</p><small>{selected.target_stores?.join('、')} · {statusLabel(selected.adoption_status)}</small></section> : null}
     </aside>
   </section>
 }

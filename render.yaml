@@ -14,7 +14,21 @@ services:
       - key: WORKSPACE_CLEANUP_INTERVAL_SECONDS
         value: 300
       - key: MAX_WORKSPACES
-        value: 5000
+        value: 300
+      - key: MAX_AUDIT_EVENTS
+        value: 200
+      - key: PUBLIC_DEMO_MODE
+        value: true
+      - key: PUBLIC_DEMO_MODEL_CALLS_PER_MINUTE
+        value: 3
+      - key: PUBLIC_DEMO_MODEL_CALLS_PER_DAY
+        value: 20
+      - key: PUBLIC_DEMO_MODEL_DAILY_BUDGET
+        value: 100
+      - key: PUBLIC_DEMO_BATCH_LIMIT
+        value: 12
+      - key: PUBLIC_DEMO_TOKEN
+        sync: false
       - key: LLM_PROVIDER_MODE
         value: deepseek
       - key: DEEPSEEK_BASE_URL

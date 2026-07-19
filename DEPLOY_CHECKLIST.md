@@ -1,13 +1,15 @@
-# 部署检查清单
+# 部署检查清单｜v0.4.3
 
-## 1. 包管理器和版本
+## 1. 运行版本
 
-- 前端：npm，唯一 lock 文件为 `frontend/package-lock.json`。
 - Node.js：22.x。
 - Python：3.12。
-- 前端版本：0.4.1。
+- 前端版本：0.4.3。
+- 后端应用版本：0.4.3。
+- API schema：1。
+- 前端唯一 lock 文件：`frontend/package-lock.json`。
 
-## 2. 本地覆盖后验证
+## 2. 覆盖后本地验证
 
 ```bash
 python3 -m compileall -q backend/app
@@ -16,6 +18,8 @@ cd ../frontend
 npm ci
 npm run typecheck
 npm test
+npm run lint
+npm run format:check
 npx playwright install --with-deps chromium
 npm run test:e2e
 npm audit --audit-level=moderate
@@ -24,7 +28,7 @@ cd ..
 python3 scripts/release_integrity.py
 ```
 
-## 3. Render
+## 3. Render 后端
 
 ```text
 Root Directory: backend
@@ -33,24 +37,35 @@ Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check: /api/health
 ```
 
-环境变量至少设置：
+至少配置：
 
 ```env
-CORS_ORIGINS=https://你的-vercel-域名
+CORS_ORIGINS=https://实际-vercel-域名
 LLM_PROVIDER_MODE=demo
 INTEGRATION_MODE=demo
+MAX_WORKSPACES=300
+MAX_AUDIT_EVENTS=200
+PUBLIC_DEMO_MODE=true
+PUBLIC_DEMO_MODEL_CALLS_PER_MINUTE=3
+PUBLIC_DEMO_MODEL_CALLS_PER_DAY=20
+PUBLIC_DEMO_MODEL_DAILY_BUDGET=100
+PUBLIC_DEMO_BATCH_LIMIT=12
+PUBLIC_DEMO_TOKEN=短期随机令牌
+VERIFICATION_SIGNING_KEY=随机长密钥
 ```
 
-接入 DeepSeek 或企业系统时，密钥只放 Render Secret。
+真实密钥只放 Render Secret。
 
-部署后检查：
+部署后 `/api/health` 必须返回：
 
-- `/api/health` 返回 0.4.0；
-- `/api/bootstrap` 和 `/api/enterprise` 接受 `X-Workspace-Id`；
-- 不同 workspace 状态隔离；
-- 当前 workspace reset 不影响其他会话。
+- `app_version: 0.4.3`；
+- `api_schema_version: 1`；
+- `git_commit` 不是 `unknown`；
+- `build_time` 有值；
+- Workspace 数量和淘汰统计；
+- 公开 Demo 额度配置。
 
-## 4. Vercel
+## 4. Vercel 前端
 
 ```text
 Framework: Vite
@@ -61,63 +76,63 @@ Output: dist
 Node: 22.x
 ```
 
-环境变量：
-
 ```env
-VITE_API_BASE=https://你的-render-地址
+VITE_API_BASE=https://实际-render-域名
 ```
 
 检查：
 
-- 刷新 hash 路由不丢失；
-- Network 中请求带 `X-Workspace-Id`；
-- 角色空间和 Demo 标签正常；
-- 后端失败时明确切换本地演示。
+- 页面标题是“蔚见 · 客户经营与销售质量智能中枢”；
+- 前端没有 API schema 不兼容提示；
+- 请求携带 `X-Workspace-Id`；
+- 角色切换立即更新页面，不等待网络；
+- 单接口失败显示“在线数据暂时陈旧”，不自动切本地数据；
+- 客户沟通文本不竖排；
+- 收起导航不显示竖排品牌文字；
+- 中文界面不显示内部英文枚举。
 
-## 5. GitHub Actions
+## 5. GitHub Actions CI
 
-CI 必须依次执行后端编译/测试、前端安装、类型检查、单测、Playwright 安装/E2E、audit、build 和 release integrity。Playwright 失败时上传：
+`PersonaFlow CI` 必须执行：
+
+- backend compileall 和 pytest；
+- frontend `npm ci`、typecheck、unit tests；
+- lint 和 format check；
+- Playwright Chromium 与本地 E2E；
+- npm audit；
+- production build；
+- release integrity。
+
+Playwright 失败时上传 `frontend/playwright-report` 和 `frontend/test-results`。
+
+## 6. Production Smoke
+
+在 GitHub Actions Variables 配置：
 
 ```text
-frontend/playwright-report
-frontend/test-results
+PRODUCTION_WEB_URL
+PRODUCTION_API_URL
 ```
 
-## 6. Secret 检查
+等待 Vercel 和 Render 部署同一 Commit 后运行 `PersonaFlow Production Smoke`。必须下载工件并核对：
 
-不得提交：
+- 首页；
+- 三角色路由；
+- 客户沟通截图；
+- 收起导航截图；
+- console error；
+- health 版本、schema 和 Commit。
 
-- `.env`；
-- DeepSeek、飞书、CRM、消息、趋势或视频密钥；
-- 真实客户或员工数据；
-- 生产 Webhook 签名；
-- Playwright 报告、截图或 trace 中的敏感内容。
+未运行该工作流时不得写“线上已验证”。
 
-## 7. 演示验收
+## 7. 安全与额度
 
-- 五个场景均可重置当前 workspace；
-- 知识变更产生版本和影响；
-- 内容编辑后提交禁用；
-- 重新核验后可提交；
-- 经理编辑后再次需要核验；
-- 承诺可提醒和完成；
-- 员工说明和经理辅导均留痕；
-- 双浏览器会话隔离。
+详见 [SECURITY_AND_QUOTA.md](./SECURITY_AND_QUOTA.md)。公开 Demo 默认规则生成；只有有效短期 Token 且未超额时才调用收费模型。
 
 ## 8. 回滚
 
-1. 在 GitHub 保留部署前 commit/tag；
-2. Render 和 Vercel 回滚到同一 commit；
-3. 不只回滚前端或后端；
-4. 若生产 Adapter 异常，先将 `INTEGRATION_MODE=demo` 或关闭对应连接器；
-5. 检查知识版本和审计记录后再恢复。
-
-## 6. v0.4.1 服务端核验签名
-
-Render 环境建议新增：
-
-```env
-VERIFICATION_SIGNING_KEY=请使用随机生成的长密钥
-```
-
-该值只放在后端环境变量中，不得提交到 GitHub 或 Vercel。修改后重新部署 Render。
+1. 保留覆盖前 Git Commit；
+2. Vercel 与 Render 回滚到同一 Commit；
+3. 不只回滚一端；
+4. 模型或 Adapter 异常时优先切回规则/Demo 模式；
+5. 回滚后重新检查 `/api/health`、schema 和生产 Smoke。

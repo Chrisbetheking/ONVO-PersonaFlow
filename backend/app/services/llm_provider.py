@@ -252,10 +252,11 @@ async def rewrite_text(
     advisor: dict[str, Any],
     vehicle: dict[str, Any],
     customer_context: dict[str, Any] | None = None,
+    allow_model: bool = True,
 ) -> dict[str, Any]:
     """Rewrite one paragraph while preserving verified facts. Falls back to deterministic editing."""
     config = provider_config()
-    if not config.ready:
+    if not config.ready or not allow_model:
         sentences = [item.strip() for item in re.split(r"(?<=[。！？])", text) if item.strip()]
         if instruction == "更简洁":
             rewritten = "".join(sentences[:3]) or text.strip()

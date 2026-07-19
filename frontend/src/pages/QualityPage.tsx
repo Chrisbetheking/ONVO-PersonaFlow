@@ -1,16 +1,271 @@
-import { useState } from 'react'
-import { GraduationCap, MessageSquareWarning, ShieldCheck, UserRound } from 'lucide-react'
-import { api } from '../api'
-import { useApp } from '../app/AppContext'
-import { Button, EmptyState, StatusPill } from '../shared/ui'
+import { useState } from "react";
+import {
+  GraduationCap,
+  MessageSquareWarning,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
+import { api } from "../api";
+import { useApp } from "../app/AppContext";
+import { ActionMenu, Button, EmptyState, StatusPill } from "../shared/ui";
+import { statusLabel } from "../shared/display";
 
-const decisions=[['no_action','无需处理'],['remind','提醒'],['coaching','创建辅导任务'],['training','指派培训'],['observe','观察 7 天'],['formal_process','标记正式流程'],['best_practice','加入优秀案例候选']] as const
-export function QualityPage(){
- const {workspace,boot,dataMode,refreshWorkspace,updateEnterpriseLocal,showToast}=useApp();const items=workspace.enterprise.quality_signals
- const [selectedId,setSelectedId]=useState(items[0]?.id||'');const [response,setResponse]=useState('');const [plan,setPlan]=useState('');const [reason,setReason]=useState('');const [working,setWorking]=useState('');const selected=items.find(i=>i.id===selectedId)||items[0]
- async function employee(){if(!selected)return;setWorking('employee');try{if(dataMode==='fallback')updateEnterpriseLocal(current=>({...current,quality_signals:current.quality_signals.map(i=>i.id===selected.id?{...i,employee_response:response,improvement_plan:plan,status:'employee_responded'}:i)}));else{await api.employeeQualityResponse(selected.id,response,plan);await refreshWorkspace()}showToast('员工说明已保存')}finally{setWorking('')}}
- async function decide(decision:string){if(!selected)return;setWorking(decision);try{if(dataMode==='fallback')updateEnterpriseLocal(current=>({...current,quality_signals:current.quality_signals.map(i=>i.id===selected.id?{...i,manager_decision:decision,decision_reason:reason,status:'decided'}:i),coaching_plans:['coaching','training','observe'].includes(decision)?[{id:`coach-${Date.now()}`,signal_id:selected.id,advisor_id:selected.advisor_id,type:decision,title:'服务质量辅导',status:'open',due_at:'7 天内',reason,created_at:new Date().toISOString(),demo_flag:true},...current.coaching_plans]:current.coaching_plans}));else{await api.managerQualityDecision(selected.id,decision,reason);await refreshWorkspace()}showToast('经理决定已记录')}finally{setWorking('')}}
- if(!selected)return <EmptyState title="暂无待复核项" description="系统只提供服务质量信号，最终结论由员工说明和经理人工确认形成。"/>
- const advisor=boot.advisors.find(i=>i.id===selected.advisor_id)
- return <section className="enterprise-three-column quality-page" data-testid="quality-center"><aside className="enterprise-list-pane"><div className="pane-toolbar"><strong>待复核队列</strong><span>{items.length}</span></div><div className="compact-queue">{items.map(item=><button key={item.id} data-testid={`quality-${item.id}`} className={selected.id===item.id?'compact-row active':'compact-row'} onClick={()=>{setSelectedId(item.id);setResponse(item.employee_response||'');setPlan(item.improvement_plan||'')}}><span><strong>{boot.advisors.find(a=>a.id===item.advisor_id)?.name} · {item.category}</strong><small>{item.trigger_rule}</small></span><StatusPill tone={item.risk_level==='high'?'danger':'warning'}>{item.status}</StatusPill></button>)}</div></aside><main className="enterprise-detail-pane"><header className="detail-heading"><div><p className="eyebrow">服务质量信号 · 待人工确认</p><h2>{advisor?.name} · {selected.category}</h2><p>{selected.system_explanation}</p></div><StatusPill tone={selected.risk_level==='high'?'danger':'warning'}>{selected.risk_level}</StatusPill></header><section className="conversation-evidence"><MessageSquareWarning/><div><strong>原始沟通证据</strong><blockquote>{selected.original_message}</blockquote><small>触发规则：{selected.trigger_rule} · 重复 {selected.repeat_count} 次</small></div></section><section><strong>涉及事实</strong><p>{selected.fact_ids.length?selected.fact_ids.join('、'):'未绑定具体事实，需经理结合上下文判断。'}</p></section><div className="demo-notice">系统不自动处罚员工。任何提醒、辅导或正式流程都必须经过人工确认，并保留员工说明。</div></main><aside className="enterprise-action-pane"><section><strong>员工补充上下文</strong><textarea data-testid="quality-employee-response" value={response} onChange={e=>setResponse(e.target.value)} placeholder="说明客户背景、特殊情况或对检测结果的补充"/><textarea value={plan} onChange={e=>setPlan(e.target.value)} placeholder="改进计划（可选）"/><Button data-testid="submit-quality-response" disabled={!response.trim()} loading={working==='employee'} onClick={()=>void employee()}>提交说明</Button></section><section><strong>经理确认</strong>{selected.employee_response?<div className="employee-response"><UserRound size={16}/><p>{selected.employee_response}</p></div>:<p>请先等待或查看员工补充说明。</p>}<textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="处理原因"/><div className="decision-grid">{decisions.map(([value,label])=><button data-testid={`quality-decision-${value}`} key={value} disabled={working!==''} onClick={()=>void decide(value)}>{value==='coaching'?<GraduationCap size={14}/>:<ShieldCheck size={14}/>} {label}</button>)}</div></section>{workspace.enterprise.coaching_plans.filter(i=>i.signal_id===selected.id).map(plan=><section key={plan.id}><strong>已创建辅导计划</strong><p>{plan.title}</p><small>{plan.due_at} · {plan.status}</small></section>)}</aside></section>
+const secondaryDecisions = [
+  ["no_action", "无需处理"],
+  ["remind", "提醒"],
+  ["training", "指派培训"],
+  ["observe", "观察 7 天"],
+  ["formal_process", "标记正式流程"],
+  ["best_practice", "加入优秀案例候选"],
+] as const;
+
+export function QualityPage() {
+  const {
+    workspace,
+    boot,
+    dataMode,
+    refreshWorkspace,
+    updateEnterpriseLocal,
+    showToast,
+  } = useApp();
+  const items = workspace.enterprise.quality_signals;
+  const [selectedId, setSelectedId] = useState(items[0]?.id || "");
+  const [response, setResponse] = useState("");
+  const [plan, setPlan] = useState("");
+  const [reason, setReason] = useState("");
+  const [working, setWorking] = useState("");
+  const selected = items.find((item) => item.id === selectedId) || items[0];
+
+  async function employee() {
+    if (!selected) return;
+    setWorking("employee");
+    try {
+      if (dataMode === "local_demo") {
+        updateEnterpriseLocal((current) => ({
+          ...current,
+          quality_signals: current.quality_signals.map((item) =>
+            item.id === selected.id
+              ? {
+                  ...item,
+                  employee_response: response,
+                  improvement_plan: plan,
+                  status: "employee_responded",
+                }
+              : item,
+          ),
+        }));
+      } else {
+        await api.employeeQualityResponse(selected.id, response, plan);
+        await refreshWorkspace();
+      }
+      showToast("员工说明已保存");
+    } finally {
+      setWorking("");
+    }
+  }
+
+  async function decide(decision: string) {
+    if (!selected) return;
+    setWorking(decision);
+    try {
+      if (dataMode === "local_demo") {
+        updateEnterpriseLocal((current) => ({
+          ...current,
+          quality_signals: current.quality_signals.map((item) =>
+            item.id === selected.id
+              ? {
+                  ...item,
+                  manager_decision: decision,
+                  decision_reason: reason,
+                  status: "decided",
+                }
+              : item,
+          ),
+          coaching_plans: ["coaching", "training", "observe"].includes(decision)
+            ? [
+                {
+                  id: `coach-${Date.now()}`,
+                  signal_id: selected.id,
+                  advisor_id: selected.advisor_id,
+                  type: decision,
+                  title: "服务质量辅导",
+                  status: "open",
+                  due_at: "7 天内",
+                  reason,
+                  created_at: new Date().toISOString(),
+                  demo_flag: true,
+                },
+                ...current.coaching_plans,
+              ]
+            : current.coaching_plans,
+        }));
+      } else {
+        await api.managerQualityDecision(selected.id, decision, reason);
+        await refreshWorkspace();
+      }
+      showToast("经理决定已记录");
+    } finally {
+      setWorking("");
+    }
+  }
+
+  if (!selected) {
+    return (
+      <EmptyState
+        title="暂无待复核项"
+        description="系统只提供服务质量信号，最终结论由员工说明和经理人工确认形成。"
+      />
+    );
+  }
+
+  const advisor = boot.advisors.find((item) => item.id === selected.advisor_id);
+  return (
+    <section
+      className="enterprise-three-column quality-page"
+      data-testid="quality-center"
+    >
+      <aside className="enterprise-list-pane">
+        <div className="pane-toolbar">
+          <strong>待复核队列</strong>
+          <span>{items.length}</span>
+        </div>
+        <div className="compact-queue">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              data-testid={`quality-${item.id}`}
+              className={
+                selected.id === item.id ? "compact-row active" : "compact-row"
+              }
+              onClick={() => {
+                setSelectedId(item.id);
+                setResponse(item.employee_response || "");
+                setPlan(item.improvement_plan || "");
+              }}
+            >
+              <span>
+                <strong>
+                  {boot.advisors.find(
+                    (candidate) => candidate.id === item.advisor_id,
+                  )?.name || "未识别顾问"}{" "}
+                  · {item.category}
+                </strong>
+                <small>{item.trigger_rule}</small>
+              </span>
+              <StatusPill>{item.status}</StatusPill>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <main className="enterprise-detail-pane">
+        <header className="detail-heading">
+          <div>
+            <p className="eyebrow">服务质量信号 · 待人工确认</p>
+            <h2>
+              {advisor?.name || "未识别顾问"} · {selected.category}
+            </h2>
+            <p>{selected.system_explanation}</p>
+          </div>
+          <StatusPill>{selected.risk_level}</StatusPill>
+        </header>
+        <section className="conversation-evidence">
+          <MessageSquareWarning />
+          <div>
+            <strong>原始沟通证据</strong>
+            <blockquote>{selected.original_message}</blockquote>
+            <small>
+              触发规则：{selected.trigger_rule} · 重复 {selected.repeat_count}{" "}
+              次
+            </small>
+          </div>
+        </section>
+        <section>
+          <strong>涉及事实</strong>
+          <p>
+            {selected.fact_ids.length
+              ? selected.fact_ids.join("、")
+              : "未绑定具体事实，需经理结合上下文判断。"}
+          </p>
+        </section>
+        <div className="demo-notice">
+          系统不自动处罚员工。任何提醒、辅导或正式流程都必须经过人工确认，并保留员工说明。
+        </div>
+      </main>
+
+      <aside className="enterprise-action-pane quality-action-pane">
+        <section>
+          <strong>员工补充上下文</strong>
+          <textarea
+            data-testid="quality-employee-response"
+            value={response}
+            onChange={(event) => setResponse(event.target.value)}
+            placeholder="说明客户背景、特殊情况或对检测结果的补充"
+          />
+          <textarea
+            value={plan}
+            onChange={(event) => setPlan(event.target.value)}
+            placeholder="改进计划（可选）"
+          />
+          <Button
+            data-testid="submit-quality-response"
+            disabled={!response.trim()}
+            loading={working === "employee"}
+            onClick={() => void employee()}
+          >
+            提交说明
+          </Button>
+        </section>
+        <section>
+          <strong>经理确认</strong>
+          {selected.employee_response ? (
+            <div className="employee-response">
+              <UserRound size={16} />
+              <p>{selected.employee_response}</p>
+            </div>
+          ) : (
+            <p>请先等待或查看员工补充说明。</p>
+          )}
+          <textarea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="处理原因"
+          />
+          <div className="quality-decision-actions">
+            <Button
+              data-testid="quality-decision-coaching"
+              loading={working === "coaching"}
+              disabled={working !== "" || !reason.trim()}
+              onClick={() => void decide("coaching")}
+            >
+              <GraduationCap size={15} /> 创建辅导任务
+            </Button>
+            <ActionMenu label="其他经理决定">
+              {secondaryDecisions.map(([value, label]) => (
+                <button
+                  data-testid={`quality-decision-${value}`}
+                  key={value}
+                  disabled={working !== ""}
+                  onClick={() => void decide(value)}
+                >
+                  <ShieldCheck size={14} /> {label}
+                </button>
+              ))}
+            </ActionMenu>
+          </div>
+        </section>
+        {workspace.enterprise.coaching_plans
+          .filter((item) => item.signal_id === selected.id)
+          .map((item) => (
+            <section key={item.id}>
+              <strong>已创建辅导计划</strong>
+              <p>{item.title}</p>
+              <small>
+                {item.due_at} · {statusLabel(item.status)}
+              </small>
+            </section>
+          ))}
+      </aside>
+    </section>
+  );
 }

@@ -32,6 +32,8 @@ REQUIRED_DOCS = [
     "RELEASE_INTEGRITY_REPORT.md",
     "DESIGN_SYSTEM.md",
     "UI_REVIEW.md",
+    "PRODUCTION_SMOKE_REPORT.md",
+    "SECURITY_AND_QUOTA.md",
 ]
 
 REQUIRED_PAGES = [
@@ -86,10 +88,10 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
 
     package = json.loads(read(root, "frontend/package.json"))
     lock = json.loads(read(root, "frontend/package-lock.json"))
-    require(package.get("version") == "0.4.2", "frontend/package.json version must be 0.4.2")
-    require(lock.get("version") == "0.4.2", "package-lock top version must be 0.4.2")
-    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.2", "package-lock root version must be 0.4.2")
-    passed.append("frontend version is 0.4.2")
+    require(package.get("version") == "0.4.3", "frontend/package.json version must be 0.4.3")
+    require(lock.get("version") == "0.4.3", "package-lock top version must be 0.4.3")
+    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.3", "package-lock root version must be 0.4.3")
+    passed.append("frontend version is 0.4.3")
 
     require((root / "frontend/src/styles/tokens.css").is_file(), "missing UI design tokens")
     require((root / "frontend/src/styles/v042.css").is_file(), "missing v0.4.2 UI consistency layer")
@@ -97,11 +99,15 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
     for component in ["IconButton", "StatusBadge", "Tabs", "ActionMenu", "StickyCommandBar", "ConfirmDialog", "LoadingSkeleton"]:
         require(f"function {component}" in shared_ui or f"const {component}" in shared_ui, f"missing shared UI component: {component}")
     require(package.get("scripts", {}).get("ui:review"), "frontend package missing ui:review screenshot command")
-    passed.append("v0.4.2 design system, shared UI and screenshot command exist")
+    passed.append("design system, shared UI and screenshot command exist")
 
     api = read(root, "frontend/src/api.ts")
     require("X-Workspace-Id" in api, "api.ts must send X-Workspace-Id")
-    passed.append("workspace header exists")
+    require("X-Demo-Token" in api, "api.ts must support short-lived Demo Token")
+    require("assertSchemaCompatibility" in api, "frontend must validate API schema compatibility")
+    api_compatibility = read(root, "frontend/src/shared/apiCompatibility.ts")
+    require('EXPECTED_API_SCHEMA_VERSION = "1"' in api_compatibility or "EXPECTED_API_SCHEMA_VERSION = '1'" in api_compatibility, "frontend expected API schema must be 1")
+    passed.append("workspace, Demo Token and API schema guards exist")
 
     followup = read(root, "frontend/src/pages/FollowUpPage.tsx")
     require("actor: '周辰'" not in followup and 'actor: "周辰"' not in followup, "FollowUpPage must not hard-code 周辰")
@@ -133,7 +139,36 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
     require('customer.get("advisor_id")' in enterprise_service and "create_promise" in enterprise_service, "promise advisor must be resolved server-side")
     require("/api/content/revalidate" in main and "/api/reviews/{review_id}/revalidate" in main, "revalidation APIs missing")
     require("enterprise" in main and "/api/integrations/feishu/simulate-change" in main, "enterprise routes missing")
-    passed.append("server-side revalidation and enterprise routes exist")
+    require('APP_VERSION = "0.4.3"' in main, "backend app version must be 0.4.3")
+    require('API_SCHEMA_VERSION = "1"' in main, "backend API schema version must be 1")
+    for field in ["app_version", "git_commit", "build_time", "api_schema_version"]:
+        require(f'"{field}"' in main, f"health response missing {field}")
+    passed.append("server-side revalidation, enterprise routes and version health fields exist")
+
+    role_context = read(root, "frontend/src/app/AppContext.tsx")
+    role_state = read(root, "frontend/src/shared/roleState.ts")
+    shell = read(root, "frontend/src/app/AppShell.tsx")
+    require("applyOptimisticRole" in role_context and "localStorage" in role_context, "role switching must be optimistic and persisted")
+    require("Promise.allSettled" in role_context, "workspace refresh must preserve partial success")
+    require("stale_online" in role_state and "local_demo" in role_state, "network state model incomplete")
+    require(shell.count("switch-role-") == 1, "role switch entry must only exist in the space switcher")
+    passed.append("optimistic role switching and three-state network handling exist")
+
+    styles = read(root, "frontend/src/styles.css")
+    ui_styles = read(root, "frontend/src/styles/v042.css")
+    require(".timeline-body" not in styles and ".timeline-main" not in styles, "timeline layout has conflicting style sources")
+    require("grid-template-columns: 34px minmax(0, 1fr)" in ui_styles, "timeline grid stability rule missing")
+    require("min-width: 240px" in ui_styles and "writing-mode: horizontal-tb" in ui_styles, "timeline width or writing mode guard missing")
+    require(".nav-collapsed .brand-copy" in ui_styles and "display: none !important" in ui_styles, "collapsed brand copy guard missing")
+    require(not (root / "frontend/src/styles/v043.css").exists(), "v0.4.3 must not add another CSS override layer")
+    passed.append("timeline and collapsed navigation use a single stable style source")
+
+    quota = read(root, "backend/app/services/quota.py")
+    for token in ["PUBLIC_DEMO_MODE", "PUBLIC_DEMO_TOKEN", "PUBLIC_DEMO_MODEL_CALLS_PER_MINUTE", "PUBLIC_DEMO_MODEL_CALLS_PER_DAY", "PUBLIC_DEMO_MODEL_DAILY_BUDGET", "PUBLIC_DEMO_BATCH_LIMIT"]:
+        require(token in quota, f"public Demo quota missing {token}")
+    require("status_code=429" in quota or "429" in quota, "public Demo quota must return 429 when exhausted")
+    require("MAX_WORKSPACES" in workspace and "MAX_AUDIT_EVENTS" in workspace and "evicted_total" in workspace, "workspace limits and eviction statistics missing")
+    passed.append("public model quota and bounded workspace storage exist")
 
     for rel in REQUIRED_DOCS:
         require((root / rel).is_file(), f"missing required document: {rel}")
@@ -169,6 +204,8 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
         "npm ci",
         "npm run typecheck",
         "npm test",
+        "npm run lint",
+        "npm run format:check",
         "playwright install --with-deps chromium",
         "npm run test:e2e",
         "npm audit --audit-level=moderate",
@@ -178,7 +215,13 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
     ]:
         require(command in ci, f"CI missing: {command}")
     require("if: failure()" in ci and "if-no-files-found: ignore" in ci, "CI failure artifact conditions missing")
-    passed.append("CI runs full validation and uploads E2E artifacts")
+    production_ci = read(root, ".github/workflows/production-smoke.yml")
+    for token in ["deployment_status", "PRODUCTION_WEB_URL", "PRODUCTION_API_URL", "npm run test:smoke", "actions/upload-artifact@v4"]:
+        require(token in production_ci, f"production smoke workflow missing {token}")
+    smoke = read(root, "frontend/e2e/production-smoke.spec.ts")
+    for token in ["app_version", "git_commit", "api_schema_version", "conversation-timeline", "brand-copy"]:
+        require(token in smoke, f"production smoke test missing {token}")
+    passed.append("CI runs full validation and has production smoke artifact workflow")
 
     e2e = read(root, "frontend/e2e/personaflow.spec.ts")
     source_text = "\n".join(
@@ -192,7 +235,11 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
         if testid not in source_text and not any(testid.startswith(prefix) for prefix in dynamic_prefixes)
     )
     require(not missing_testids, f"E2E testids absent from source: {missing_testids}")
-    passed.append(f"{len(testids)} literal E2E testids exist in source")
+    stability = read(root, "frontend/e2e/stability.spec.ts")
+    for token in ["toBeLessThan(150)", "timeline-body", "stale-online-banner", "toHaveScreenshot", "429"]:
+        require(token in stability, f"stability E2E missing {token}")
+    require((root / "frontend/e2e/stability.spec.ts-snapshots/conversation-workbench-1440-linux.png").is_file(), "visual regression snapshot missing")
+    passed.append(f"{len(testids)} literal E2E testids and stability assertions exist")
 
     if manifest or archive:
         require(manifest is not None and archive is not None, "--manifest and --zip must be supplied together")

@@ -19,7 +19,14 @@ ADVISORS_FILE = DATA_DIR / "advisors.json"
 ENTERPRISE_FILE = DATA_DIR / "enterprise.json"
 WORKSPACE_TTL_SECONDS = max(300, int(os.getenv("WORKSPACE_TTL_SECONDS", "21600")))
 WORKSPACE_CLEANUP_INTERVAL_SECONDS = max(30, int(os.getenv("WORKSPACE_CLEANUP_INTERVAL_SECONDS", "300")))
-MAX_WORKSPACES = max(20, int(os.getenv("MAX_WORKSPACES", "5000")))
+MAX_WORKSPACES = max(20, int(os.getenv("MAX_WORKSPACES", "300")))
+MAX_AUDIT_EVENTS = max(20, int(os.getenv("MAX_AUDIT_EVENTS", "200")))
+MAX_PROMISES = max(20, int(os.getenv("MAX_PROMISES", "120")))
+MAX_NOTIFICATIONS = max(20, int(os.getenv("MAX_NOTIFICATIONS", "120")))
+MAX_SYNC_EVENTS = max(20, int(os.getenv("MAX_SYNC_EVENTS", "120")))
+MAX_REVALIDATION_TASKS = max(20, int(os.getenv("MAX_REVALIDATION_TASKS", "160")))
+MAX_CAMPAIGN_TASKS = max(20, int(os.getenv("MAX_CAMPAIGN_TASKS", "200")))
+MAX_FOLLOWUP_EVENTS = max(20, int(os.getenv("MAX_FOLLOWUP_EVENTS", "160")))
 _WORKSPACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 
 
@@ -172,9 +179,45 @@ def _stamp_enterprise_state(state: dict[str, Any], workspace_id: str) -> None:
                         _stamp_object_metadata(action, workspace_id, source_type="next_best_action_demo")
 
 
+def _enforce_state_limits(state: dict[str, Any]) -> None:
+    """Bound public-demo memory growth while preserving the most useful recent state."""
+    for key, limit in (
+        ("audit_log", MAX_AUDIT_EVENTS),
+        ("promises", MAX_PROMISES),
+        ("notifications", MAX_NOTIFICATIONS),
+        ("sync_events", MAX_SYNC_EVENTS),
+        ("revalidation_tasks", MAX_REVALIDATION_TASKS),
+    ):
+        items = state.get(key)
+        if isinstance(items, list) and len(items) > limit:
+            state[key] = items[:limit]
+
+    for followup in state.get("followups", []) or []:
+        if not isinstance(followup, dict):
+            continue
+        events = followup.get("events")
+        if isinstance(events, list) and len(events) > MAX_FOLLOWUP_EVENTS:
+            followup["events"] = events[-MAX_FOLLOWUP_EVENTS:]
+
+    for campaign in state.get("campaigns", []) or []:
+        if not isinstance(campaign, dict):
+            continue
+        tasks = campaign.get("tasks")
+        if isinstance(tasks, list) and len(tasks) > MAX_CAMPAIGN_TASKS:
+            campaign["tasks"] = tasks[-MAX_CAMPAIGN_TASKS:]
+            summary = campaign.setdefault("task_summary", {})
+            summary.update({
+                "total": len(campaign["tasks"]),
+                "ready": sum(1 for item in campaign["tasks"] if item.get("status") in {"ready", "submitted"}),
+                "pending_review": sum(1 for item in campaign["tasks"] if item.get("status") == "needs_review"),
+                "failed": sum(1 for item in campaign["tasks"] if item.get("status") == "failed"),
+            })
+
+
 def _new_workspace_state(workspace_id: str) -> dict[str, Any]:
     state = copy.deepcopy(_INITIAL_STATE)
     _stamp_enterprise_state(state, workspace_id)
+    _enforce_state_limits(state)
     return state
 
 
@@ -190,6 +233,8 @@ class WorkspaceStore:
         self._lock = RLock()
         self._entries: dict[str, dict[str, Any]] = {}
         self._last_cleanup = 0.0
+        self._expired_total = 0
+        self._evicted_total = 0
 
     def _cleanup_locked(self, now: float) -> None:
         if now - self._last_cleanup < WORKSPACE_CLEANUP_INTERVAL_SECONDS and len(self._entries) <= MAX_WORKSPACES:
@@ -200,11 +245,13 @@ class WorkspaceStore:
             if now - float(entry["last_access"]) > WORKSPACE_TTL_SECONDS
         ]
         for workspace_id in expired:
-            self._entries.pop(workspace_id, None)
+            if self._entries.pop(workspace_id, None) is not None:
+                self._expired_total += 1
         if len(self._entries) > MAX_WORKSPACES:
             ordered = sorted(self._entries.items(), key=lambda pair: float(pair[1]["last_access"]))
             for workspace_id, _entry in ordered[: len(self._entries) - MAX_WORKSPACES]:
-                self._entries.pop(workspace_id, None)
+                if self._entries.pop(workspace_id, None) is not None:
+                    self._evicted_total += 1
         self._last_cleanup = now
 
     def _entry_locked(self, workspace_id: str) -> dict[str, Any]:
@@ -224,20 +271,32 @@ class WorkspaceStore:
 
     def reset(self, workspace_id: str) -> dict[str, Any]:
         with self._lock:
-            self._entries[workspace_id] = {"state": _new_workspace_state(workspace_id), "last_access": time.monotonic()}
-            return copy.deepcopy(self._entries[workspace_id]["state"])
+            state = _new_workspace_state(workspace_id)
+            _enforce_state_limits(state)
+            self._entries[workspace_id] = {"state": state, "last_access": time.monotonic()}
+            return copy.deepcopy(state)
 
     def mutate(self, workspace_id: str, mutation: Callable[[dict[str, Any]], Any]) -> Any:
         with self._lock:
             state = self._entry_locked(workspace_id)["state"]
             result = mutation(state)
             _stamp_enterprise_state(state, workspace_id)
+            _enforce_state_limits(state)
             return copy.deepcopy(result)
 
-    def active_count(self) -> int:
+    def stats(self) -> dict[str, int]:
         with self._lock:
             self._cleanup_locked(time.monotonic())
-            return len(self._entries)
+            return {
+                "active_workspaces": len(self._entries),
+                "max_workspaces": MAX_WORKSPACES,
+                "ttl_seconds": WORKSPACE_TTL_SECONDS,
+                "expired_total": self._expired_total,
+                "evicted_total": self._evicted_total,
+            }
+
+    def active_count(self) -> int:
+        return self.stats()["active_workspaces"]
 
 
 _STORE = WorkspaceStore()
@@ -252,7 +311,7 @@ def snapshot(workspace_id: str) -> dict[str, Any]:
 
 
 def workspace_stats() -> dict[str, int]:
-    return {"active_workspaces": _STORE.active_count(), "ttl_seconds": WORKSPACE_TTL_SECONDS}
+    return _STORE.stats()
 
 
 def mutate_state(workspace_id: str, mutation: Callable[[dict[str, Any]], Any]) -> Any:

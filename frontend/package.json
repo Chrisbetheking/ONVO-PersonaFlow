@@ -1,6 +1,6 @@
 {
   "name": "personaflow-frontend",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,11 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:e2e:headed": "playwright test --headed",
-    "ui:review": "playwright test e2e/ui-review.spec.ts --workers=1"
+    "ui:review": "playwright test e2e/ui-review.spec.ts --workers=1",
+    "lint": "node scripts/check-ui-contracts.mjs && tsc -b --pretty false",
+    "format": "prettier --write src/app/AppContext.tsx src/app/AppShell.tsx src/api.ts src/types.ts src/shared/display.ts src/shared/display.test.ts src/shared/apiCompatibility.ts src/shared/apiCompatibility.test.ts src/shared/roleState.ts src/shared/roleState.test.ts src/shared/ui/index.tsx src/pages/QualityPage.tsx src/pages/RadarPage.tsx e2e/stability.spec.ts e2e/ui-review.spec.ts e2e/production-smoke.spec.ts scripts/check-ui-contracts.mjs scripts/run-e2e.mjs playwright.config.ts playwright.production.config.ts",
+    "format:check": "prettier --check src/app/AppContext.tsx src/app/AppShell.tsx src/api.ts src/types.ts src/shared/display.ts src/shared/display.test.ts src/shared/apiCompatibility.ts src/shared/apiCompatibility.test.ts src/shared/roleState.ts src/shared/roleState.test.ts src/shared/ui/index.tsx src/pages/QualityPage.tsx src/pages/RadarPage.tsx e2e/stability.spec.ts e2e/ui-review.spec.ts e2e/production-smoke.spec.ts scripts/check-ui-contracts.mjs scripts/run-e2e.mjs playwright.config.ts playwright.production.config.ts",
+    "test:smoke": "playwright test --config=playwright.production.config.ts --workers=1"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.3",
@@ -25,6 +29,7 @@
     "@playwright/test": "^1.61.1",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
+    "prettier": "^3.6.2",
     "vitest": "^4.1.10"
   }
 }
