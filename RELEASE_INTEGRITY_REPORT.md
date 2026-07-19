@@ -1,24 +1,75 @@
-# 发布一致性报告
+# RELEASE_INTEGRITY_REPORT｜v0.4.1
 
-> 本文件在补丁生成和干净基线复验后填写最终统计。
+## 基线与范围
 
-## 自动检查
+- 唯一基线：`ONVO-PersonaFlow-v0.4.0-DIRECT-UPLOAD.zip`
+- 未重新创建项目；
+- 未更换 React、TypeScript、Vite 或 FastAPI；
+- 未删除现有顾问空间和 v0.4.0 企业模块；
+- 本轮新增 2 个文件，修改 44 个文件，删除 0 个文件。
 
-`scripts/release_integrity.py` 检查：
+## 自动一致性检查
 
-- 前端版本和 lock 版本均为 0.4.0；
-- API 携带 `X-Workspace-Id`；
-- 原有预约、顾问保存和完整审核实现未回退；
-- 企业页面和后端重新核验路由存在；
-- README 引用的本地 Markdown 文件真实存在；
-- CI 包含后端、前端、Playwright、audit、build、release integrity 和失败工件上传；
-- E2E 使用的 literal `data-testid` 在源码中存在；
-- 可选校验 PATCH_MANIFEST 与 ZIP 文件列表完全一致。
+`scripts/release_integrity.py` 已更新并检查：
 
-## 最终结果
+- `frontend/package.json` 与 `package-lock.json` 均为 `0.4.1`；
+- API 全部携带 `X-Workspace-Id`；
+- 试驾预约未写死顾问；
+- 顾问画像调用真实更新 API；
+- 审核页使用完整正文并支持重新核验；
+- `PolicyPage` 与全部企业页面存在；
+- 内容失效、证据警告和服务端重新核验路由存在；
+- 客户承诺由服务端根据客户档案确认负责顾问；
+- README 引用的本地 Markdown 文件全部存在；
+- CI 执行 compileall、pytest、npm ci、typecheck、unit、Playwright、audit、build 和 release integrity；
+- CI 在失败时上传 Playwright 报告与测试结果；
+- E2E 使用的 65 个 literal `data-testid` 均可在源码中解析；
+- PATCH_MANIFEST 与 ZIP 文件列表可进行严格一一校验。
 
-- 最终工作区 `python3 scripts/release_integrity.py`：通过。
-- 相对用户上传 GitHub main 基线：新增 29、修改 23、删除 0。
-- 企业补丁包含 52 个项目文件，PATCH_MANIFEST 与 ZIP 将由同一文件列表生成并再次校验。
-- 将补丁应用到重新解压的 GitHub main 基线后：后端 16 passed、前端单测 13 passed、Playwright 15 passed、audit 0 vulnerabilities、production build 和 release integrity 均通过。
-- Playwright 官方安装命令已执行；当前沙箱 DNS 受限，实际 E2E 使用系统 Chromium 完成。
+## 双工作区验证
+
+### 最终工作区
+
+```text
+backend pytest        20 passed
+frontend unit tests   14 passed
+Playwright E2E        15/15 passed
+npm audit             0 vulnerabilities
+production build      passed
+release integrity     PASSED
+```
+
+### 干净基线覆盖后
+
+```text
+backend pytest        20 passed
+frontend unit tests   14 passed
+Playwright E2E        15/15 passed
+npm audit             0 vulnerabilities
+production build      passed
+release integrity     PASSED
+```
+
+## P0 状态一致性
+
+正文、标题、CTA、局部改写和风险建议修改共用同一失效机制。失效后：
+
+```text
+claim              stale
+evidence           needs_revalidation
+compliance         needs_revalidation
+submit / send      blocked
+manager approve    blocked after manager edit
+```
+
+重新核验成功后才生成新的签名凭证并恢复“已核验”。
+
+## Demo / 真实边界
+
+真实运行的是当前 workspace 内的状态机、签名核验、审计、知识版本、影响、承诺、质量复核、辅导、案例和隔离。
+
+Feishu、CRM、Messaging 和 Trends 仍为明确标记的 Demo Adapter。真实企业应用、生产权限、真实客户和真实业务提升结论均未伪造。
+
+## 环境限制
+
+`npx playwright install --with-deps chromium` 已执行，但当前沙箱 DNS 无法解析 Debian 软件源。最终和干净基线 E2E 均使用环境内 Chromium 完成。CI 中保留正式 Playwright Chromium 安装步骤。

@@ -111,6 +111,7 @@ export const api = {
   analyzeLeads: (messages: string[]) => post<LeadAnalysis>('/api/leads/analyze', { messages }),
   followups: () => request<{ items: Followup[]; data_mode: string }>('/api/followups'),
   addFollowupEvent: (customerId: string, payload: Record<string, unknown>) => post<Followup>(`/api/followups/${customerId}/events`, payload),
+  convertFollowupEvent: (customerId: string, eventId: string, action: string, note = '') => post(`/api/followups/${customerId}/events/${eventId}/convert`, { action, note }),
   toggleMemory: (customerId: string, memoryId: string, active: boolean) => post(`/api/followups/${customerId}/memories/${memoryId}`, { active }),
   reviews: () => request<{ items: ReviewItem[]; data_mode: string }>('/api/reviews'),
   decideReview: (id: string, decision: 'approved' | 'returned', reason: string, body: string, callToAction: string, riskAnnotations: ReviewItem['risk_annotations']) => post<ReviewItem>(`/api/reviews/${id}/decision`, { decision, reason, body, call_to_action: callToAction, risk_annotations: riskAnnotations }),
@@ -128,6 +129,7 @@ export const api = {
   knowledge: () => request<{ items: KnowledgeItem[]; data_mode: string }>('/api/knowledge'),
   simulateFeishuChange: (changeType: string) => post('/api/integrations/feishu/simulate-change', { change_type: changeType }),
   syncIntegration: (name: string) => post(`/api/integrations/${name}/sync`, {}),
+  retrySyncEvent: (eventId: string, reason = '手动重试') => post(`/api/sync-events/${eventId}/retry`, { reason }),
   impactAction: (impactId: string, objectId: string, action: string, reason = '', owner = '') => post(`/api/knowledge-impacts/${impactId}/actions`, { object_id: objectId, action, reason, owner }),
   customers: () => request<{ items: CustomerProfile[]; data_mode: string }>('/api/customers'),
   customerAction: (customerId: string, actionId: string, action: string, note = '') => post(`/api/customers/${customerId}/next-actions`, { action_id: actionId, action, note }),
@@ -140,6 +142,6 @@ export const api = {
   managerQualityDecision: (id: string, decision: string, reason = '') => post(`/api/quality-signals/${id}/manager-decision`, { decision, reason }),
   publishBestPractice: (id: string) => post<BestPractice>(`/api/best-practices/${id}/publish`, {}),
   bestPracticeAction: (id: string, action: string) => post<BestPractice>(`/api/best-practices/${id}/actions`, { action }),
-  customerRiskAction: (id: string, action: string) => post<CustomerRisk>(`/api/customer-risks/${id}/actions`, { action }),
+  customerRiskAction: (id: string, action: string, note = '') => post<CustomerRisk>(`/api/customer-risks/${id}/actions`, { action, note }),
   resetScenario: (scenarioId: string) => post<EnterpriseWorkspace>('/api/demo/scenario', { scenario_id: scenarioId }),
 }

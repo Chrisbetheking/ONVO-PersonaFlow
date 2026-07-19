@@ -11,6 +11,8 @@ from threading import RLock
 from typing import Any, Callable
 from uuid import uuid4
 
+from .verification import verify_verification_token
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 WORKSPACE_FILE = DATA_DIR / "workspace.json"
 ADVISORS_FILE = DATA_DIR / "advisors.json"
@@ -45,6 +47,7 @@ def _normalize_review(item: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("knowledge_version", "onvo-cn-2026.07.18")
     normalized.setdefault("verification_version", 1)
     normalized.setdefault("verified_at", normalized.get("submitted_at", ""))
+    normalized.setdefault("verification_token", "")
     normalized.setdefault("version_history", [])
     return normalized
 
@@ -56,13 +59,74 @@ def _normalize_campaign(item: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_opportunity(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(item)
+    source = str(normalized.get("source") or "客户信号")
+    kind = str(normalized.get("kind") or "customer")
+    if "活动" in source or normalized.get("campaign_id"):
+        source_type = "总部活动"
+    elif "热点" in source or kind == "topic":
+        source_type = "热点机会"
+    elif "知识" in source:
+        source_type = "知识变更"
+    elif "承诺" in source:
+        source_type = "承诺到期"
+    elif "风险" in source:
+        source_type = "客户风险"
+    else:
+        source_type = "客户信号"
+    normalized.setdefault("source_type", source_type)
+    normalized.setdefault("owner", "当前负责顾问")
+    normalized.setdefault("due_at", normalized.get("due_label", "24 小时内"))
+    normalized.setdefault("impact_label", "1 位客户" if normalized.get("customer") else "客户分群")
+    normalized.setdefault("manager_help", source_type in {"客户风险", "知识变更"})
+    if kind == "segment":
+        normalized.setdefault("segment_customers", ["陈女士", "许先生", "李女士"])
+    return normalized
+
+
+def _normalize_followup(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(item)
+    for event in normalized.get("events", []):
+        event.setdefault("source_label", "授权沟通 Demo" if event.get("type") in {"customer_message", "advisor_sent"} else "系统事件")
+        event.setdefault("sync_status", "已同步" if event.get("type") in {"customer_message", "advisor_sent"} else "本地记录")
+        event.setdefault("source_detail", "Messaging Demo Adapter" if "Demo" in event.get("source_label", "") else "当前工作区")
+    return normalized
+
+
+def _normalize_customer_profile(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(item)
+    state = normalized.get("state", {})
+    for key in ["need_clarity", "product_fit", "price_acceptance", "family_decision", "urgency", "relationship"]:
+        dimension = state.get(key)
+        if not isinstance(dimension, dict):
+            continue
+        evidence_items = []
+        for evidence in dimension.get("evidence", []) or []:
+            if isinstance(evidence, dict):
+                entry = copy.deepcopy(evidence)
+            else:
+                entry = {"text": str(evidence)}
+            entry.setdefault("source_event", "最近客户沟通")
+            entry.setdefault("occurred_at", normalized.get("last_synced_at", "最近同步"))
+            entry.setdefault("channel", "授权沟通 Demo")
+            entry.setdefault("method", "规则")
+            entry.setdefault("demo_flag", True)
+            evidence_items.append(entry)
+        dimension["evidence"] = evidence_items
+    return normalized
+
+
 def _load_initial() -> dict[str, Any]:
     state = _read_json(WORKSPACE_FILE)
     state["advisors"] = _read_json(ADVISORS_FILE)
     enterprise = _read_json(ENTERPRISE_FILE)
     for key, value in enterprise.items():
         state.setdefault(key, value)
+    state["customer_profiles"] = [_normalize_customer_profile(item) for item in state.get("customer_profiles", [])]
     state.setdefault("drafts", [])
+    state["opportunities"] = [_normalize_opportunity(item) for item in state.get("opportunities", [])]
+    state["followups"] = [_normalize_followup(item) for item in state.get("followups", [])]
     state["reviews"] = [_normalize_review(item) for item in state.get("reviews", [])]
     state["campaigns"] = [_normalize_campaign(item) for item in state.get("campaigns", [])]
     return state
@@ -247,6 +311,7 @@ def update_advisor(workspace_id: str, advisor_id: str, patch: dict[str, Any]) ->
         for item in state["advisors"]:
             if item["id"] != advisor_id:
                 continue
+            before = copy.deepcopy(item)
             for key, value in patch.items():
                 if key not in allowed:
                     continue
@@ -255,6 +320,21 @@ def update_advisor(workspace_id: str, advisor_id: str, patch: dict[str, Any]) ->
                 else:
                     item[key] = str(value).strip()
             item["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            state.setdefault("audit_log", []).insert(0, {
+                "id": f"audit-{uuid4().hex[:10]}",
+                "actor": item.get("name") or "顾问演示用户",
+                "role": "顾问空间",
+                "action": "更新顾问画像",
+                "object_type": "advisor",
+                "object_id": advisor_id,
+                "before": before,
+                "after": copy.deepcopy(item),
+                "knowledge_version": "",
+                "verification_version": 0,
+                "demo_flag": True,
+                "workspace_id": workspace_id,
+                "created_at": item["updated_at"],
+            })
             return item
         raise KeyError(f"Unknown advisor_id: {advisor_id}")
 
@@ -305,6 +385,18 @@ def add_followup_event(workspace_id: str, customer_id: str, event: dict[str, Any
                 actor = (advisor or {}).get("name") or "顾问"
             else:
                 actor = str(event.get("actor") or (advisor or {}).get("name") or "系统")
+            if event_type == "advisor_sent":
+                task_id = str(event.get("task_id") or "")
+                variant_id = str(event.get("variant_id") or "")
+                draft = next((draft for draft in state.get("drafts", []) if draft.get("task_id") == task_id and draft.get("variant_id") == variant_id), None)
+                if not draft:
+                    raise ValueError("发送前必须先保存当前已核验版本")
+                if draft.get("verification_status") != "verified" or draft.get("compliance_status") != "verified":
+                    raise ValueError("内容事实或合规状态已失效，重新核验后才能记录发送")
+                if int(event.get("verification_version") or 0) != int(draft.get("verification_version") or 0):
+                    raise ValueError("发送版本不是最新核验版本")
+                if str(event.get("verification_token") or "") != str(draft.get("verification_token") or ""):
+                    raise ValueError("发送核验凭证无效，请重新核验")
             stored = {
                 "id": f"event-{uuid4().hex[:8]}",
                 "type": event_type,
@@ -316,6 +408,9 @@ def add_followup_event(workspace_id: str, customer_id: str, event: dict[str, Any
                 "scheduled_at": str(event.get("scheduled_at") or "").strip(),
                 "items": [str(value).strip() for value in event.get("items", []) if str(value).strip()],
                 "notes": str(event.get("notes") or "").strip(),
+                "source_label": str(event.get("source_label") or ("授权沟通 Demo" if event_type in {"customer_message", "advisor_sent"} else "人工补录" if event_type == "advisor_note" else "系统事件")),
+                "sync_status": str(event.get("sync_status") or ("已同步" if event_type in {"customer_message", "advisor_sent"} else "本地记录")),
+                "source_detail": str(event.get("source_detail") or "当前工作区"),
             }
             item["events"].append(stored)
             if stored["type"] == "test_drive_booked":
@@ -340,6 +435,12 @@ def add_followup_event(workspace_id: str, customer_id: str, event: dict[str, Any
                 })
                 item["next_action"] = "根据客户最新回复确认具体问题，并推动下一步到店或试驾。"
                 item["next_action_due"] = "24 小时内"
+            state.setdefault("audit_log", []).insert(0, {
+                "id": f"audit-{uuid4().hex[:10]}", "actor": actor, "role": "顾问空间",
+                "action": f"记录客户沟通：{stored['type']}", "object_type": "followup", "object_id": customer_id,
+                "before": None, "after": copy.deepcopy(stored), "knowledge_version": "", "verification_version": int(event.get("verification_version") or 0),
+                "demo_flag": True, "workspace_id": workspace_id, "created_at": datetime.now().isoformat(timespec="seconds"),
+            })
             return item
         raise KeyError(f"Unknown customer_id: {customer_id}")
 
@@ -353,7 +454,23 @@ def toggle_memory(workspace_id: str, customer_id: str, memory_id: str, active: b
                 continue
             for memory in item["memories"]:
                 if memory["id"] == memory_id:
+                    before = copy.deepcopy(memory)
                     memory["active"] = active
+                    state.setdefault("audit_log", []).insert(0, {
+                        "id": f"audit-{uuid4().hex[:10]}",
+                        "actor": "顾问演示用户",
+                        "role": "顾问空间",
+                        "action": "启用客户记忆" if active else "停用客户记忆",
+                        "object_type": "memory",
+                        "object_id": memory_id,
+                        "before": before,
+                        "after": copy.deepcopy(memory),
+                        "knowledge_version": "",
+                        "verification_version": 0,
+                        "demo_flag": True,
+                        "workspace_id": workspace_id,
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                    })
                     return memory
         raise KeyError(f"Unknown memory_id: {memory_id}")
 
@@ -392,8 +509,17 @@ def decide_review(workspace_id: str, review_id: str, decision: str, reason: str,
                     "body": body,
                     "call_to_action": cta,
                 })
-            if decision == "approved" and item.get("verification_status") != "verified":
-                raise ValueError("经理修改后的内容必须重新核验，不能直接批准")
+            if decision == "approved":
+                if item.get("verification_status") != "verified" or item.get("compliance_status") != "verified":
+                    raise ValueError("经理修改后的内容必须重新核验，不能直接批准")
+                valid = verify_verification_token(
+                    item.get("verification_token"), task_id=item.get("task_id", ""), variant_id=item.get("variant_id", ""),
+                    platform=item.get("platform", ""), title=item.get("content_title", ""), body=item.get("reviewed_body", ""),
+                    call_to_action=item.get("reviewed_call_to_action", ""), verification_version=int(item.get("verification_version") or 0),
+                    knowledge_version=item.get("knowledge_version", ""),
+                )
+                if not valid:
+                    raise ValueError("审核内容不是最新核验版本，不能批准")
             item["status"] = decision
             item["decision_reason"] = reason.strip()
             item["decision_at"] = datetime.now().isoformat(timespec="seconds")
@@ -489,25 +615,60 @@ def save_draft(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "knowledge_version": str(payload.get("knowledge_version") or "onvo-cn-2026.07.18"),
         "verification_version": int(payload.get("verification_version") or 1),
         "verified_at": str(payload.get("verified_at") or datetime.now().isoformat(timespec="seconds")),
+        "verification_token": str(payload.get("verification_token") or ""),
         "version_history": copy.deepcopy(payload.get("version_history") or []),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
 
+    if stored["verification_status"] == "verified":
+        valid = verify_verification_token(
+            stored.get("verification_token"), task_id=stored["task_id"], variant_id=stored["variant_id"],
+            platform=stored["platform"], title=stored["title"], body=stored["body"], call_to_action=stored["call_to_action"],
+            verification_version=stored["verification_version"], knowledge_version=stored["knowledge_version"],
+        )
+        if not valid:
+            raise ValueError("核验凭证无效或内容已变化，请重新核验后保存")
+
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        before = None
         for index, item in enumerate(state["drafts"]):
             if item["task_id"] == stored["task_id"] and item["variant_id"] == stored["variant_id"]:
+                before = copy.deepcopy(item)
                 stored["id"] = item["id"]
                 state["drafts"][index] = stored
-                return stored
-        state["drafts"].append(stored)
+                break
+        else:
+            state["drafts"].append(stored)
+        state.setdefault("audit_log", []).insert(0, {
+            "id": f"audit-{uuid4().hex[:10]}",
+            "actor": "顾问演示用户",
+            "role": "顾问空间",
+            "action": "保存已核验内容" if stored["verification_status"] == "verified" else "保存待重新核验草稿",
+            "object_type": "draft",
+            "object_id": stored["id"],
+            "before": before,
+            "after": copy.deepcopy(stored),
+            "knowledge_version": stored.get("knowledge_version", ""),
+            "verification_version": stored.get("verification_version", 0),
+            "demo_flag": True,
+            "workspace_id": workspace_id,
+            "created_at": stored["updated_at"],
+        })
         return stored
 
     return _STORE.mutate(workspace_id, mutation)
 
 
 def submit_review(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if str(payload.get("verification_status") or "verified") != "verified":
+    if str(payload.get("verification_status") or "") != "verified" or str(payload.get("compliance_status") or "") != "verified":
         raise ValueError("内容已发生变化，必须重新核验后才能提交审核")
+    current = snapshot(workspace_id)
+    existing = next((item for item in current.get("drafts", []) if item.get("task_id") == payload.get("task_id") and item.get("variant_id") == payload.get("variant_id")), None)
+    if not existing:
+        raise ValueError("提交审核前必须先保存当前已核验版本")
+    for field in ["platform", "title", "body", "call_to_action", "verification_version", "verification_token"]:
+        if str(existing.get(field, "")) != str(payload.get(field, "")):
+            raise ValueError("提交内容与最近保存的核验版本不一致，请重新保存并核验")
     draft = save_draft(workspace_id, {**payload, "status": "submitted"})
     review = _normalize_review({
         "id": f"review-{uuid4().hex[:8]}",
@@ -535,11 +696,27 @@ def submit_review(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "knowledge_version": draft.get("knowledge_version", "onvo-cn-2026.07.18"),
         "verification_version": draft.get("verification_version", 1),
         "verified_at": draft.get("verified_at", ""),
+        "verification_token": draft.get("verification_token", ""),
         "version_history": draft.get("version_history", []),
     })
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         state["reviews"].insert(0, review)
+        state.setdefault("audit_log", []).insert(0, {
+            "id": f"audit-{uuid4().hex[:10]}",
+            "actor": review.get("advisor_name") or "顾问演示用户",
+            "role": "顾问空间",
+            "action": "提交内容审核",
+            "object_type": "review",
+            "object_id": review["id"],
+            "before": None,
+            "after": copy.deepcopy(review),
+            "knowledge_version": review.get("knowledge_version", ""),
+            "verification_version": review.get("verification_version", 0),
+            "demo_flag": True,
+            "workspace_id": workspace_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        })
         return review
 
     return _STORE.mutate(workspace_id, mutation)

@@ -35,6 +35,7 @@ REQUIRED_DOCS = [
 REQUIRED_PAGES = [
     "frontend/src/pages/RadarPage.tsx",
     "frontend/src/pages/KnowledgePage.tsx",
+    "frontend/src/pages/PolicyPage.tsx",
     "frontend/src/pages/Customer360Page.tsx",
     "frontend/src/pages/PromisesPage.tsx",
     "frontend/src/pages/QualityPage.tsx",
@@ -83,10 +84,10 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
 
     package = json.loads(read(root, "frontend/package.json"))
     lock = json.loads(read(root, "frontend/package-lock.json"))
-    require(package.get("version") == "0.4.0", "frontend/package.json version must be 0.4.0")
-    require(lock.get("version") == "0.4.0", "package-lock top version must be 0.4.0")
-    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.0", "package-lock root version must be 0.4.0")
-    passed.append("frontend version is 0.4.0")
+    require(package.get("version") == "0.4.1", "frontend/package.json version must be 0.4.1")
+    require(lock.get("version") == "0.4.1", "package-lock top version must be 0.4.1")
+    require(lock.get("packages", {}).get("", {}).get("version") == "0.4.1", "package-lock root version must be 0.4.1")
+    passed.append("frontend version is 0.4.1")
 
     api = read(root, "frontend/src/api.ts")
     require("X-Workspace-Id" in api, "api.ts must send X-Workspace-Id")
@@ -116,6 +117,10 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
     main = read(root, "backend/app/main.py")
     content_editor = read(root, "frontend/src/features/content-generation/ContentEditor.tsx")
     require("needs_revalidation" in workspace and "content-revalidation-warning" in content_editor, "stale verification state missing")
+    evidence_panel = read(root, "frontend/src/features/evidence-trace/EvidencePanel.tsx")
+    require("待重新核验" in evidence_panel and "verificationStatus" in evidence_panel, "stale evidence presentation missing")
+    enterprise_service = read(root, "backend/app/services/enterprise.py")
+    require('customer.get("advisor_id")' in enterprise_service and "create_promise" in enterprise_service, "promise advisor must be resolved server-side")
     require("/api/content/revalidate" in main and "/api/reviews/{review_id}/revalidate" in main, "revalidation APIs missing")
     require("enterprise" in main and "/api/integrations/feishu/simulate-change" in main, "enterprise routes missing")
     passed.append("server-side revalidation and enterprise routes exist")

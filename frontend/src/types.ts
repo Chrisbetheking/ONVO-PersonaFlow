@@ -67,6 +67,12 @@ export type Opportunity = {
   vehicle_id: string
   campaign_id: string | null
   customer: CustomerContext | null
+  source_type?: string
+  owner?: string
+  due_at?: string
+  impact_label?: string
+  manager_help?: boolean
+  segment_customers?: Array<{ id: string; name: string; stage: string; concern?: string }>
 }
 
 export type Evidence = {
@@ -77,6 +83,7 @@ export type Evidence = {
   source_url: string
   verified_at: string
   source_type: string
+  status?: 'verified' | 'needs_revalidation' | 'stale' | string
 }
 
 export type Claim = {
@@ -118,6 +125,7 @@ export type ContentVariant = {
   verification_version: number
   verified_at: string
   version_history: Array<Record<string, unknown>>
+  verification_token: string
 }
 
 export type ComplianceResult = {
@@ -175,6 +183,9 @@ export type FollowupEvent = {
   scheduled_at?: string
   items?: string[]
   notes?: string
+  source_label?: string
+  sync_status?: string
+  source_detail?: string
 }
 
 export type Followup = {
@@ -220,6 +231,7 @@ export type ReviewItem = {
   verification_version: number
   verified_at: string
   version_history: Array<Record<string, unknown>>
+  verification_token?: string
 }
 
 export type CampaignTaskResult = {
@@ -410,7 +422,8 @@ export type NextBestAction = {
   updated_at?: string
 }
 
-export type CustomerStateDimension = { level: string; evidence: string[] }
+export type CustomerStateEvidence = { text: string; source: string; occurred_at: string; channel: string; method: '规则' | '模型' | '人工' | string; demo_flag: boolean }
+export type CustomerStateDimension = { level: string; evidence: Array<string | CustomerStateEvidence> }
 export type CustomerProfile = {
   id: string
   name: string
@@ -462,6 +475,8 @@ export type PromiseItem = {
   demo_flag: boolean
   completed_at?: string
   delay_reason?: string
+  source_event_id?: string
+  manager_reason?: string
 }
 
 export type QualitySignal = {
@@ -488,11 +503,11 @@ export type CoachingPlan = { id: string; signal_id: string; advisor_id: string; 
 export type BestPractice = { id: string; scenario: string; customer_question: string; advisor_approach: string; why_effective: string; result: string; audiences: string[]; vehicle_ids: string[]; not_for: string[]; reviewer: string; source: string; anonymous: boolean; status: string; demo_flag: boolean; published_at?: string; uses?: string[]; training_status?: string; cross_store_status?: string; target_stores?: string[]; adoption_status?: string }
 export type CustomerRisk = { id: string; customer_id: string; level: string; reason: string; evidence: string[]; impact: string; recommended_action: string; manager_help: boolean; due_at: string; status: string; demo_flag: boolean; updated_at?: string }
 export type Experiment = { id: string; name: string; metric: string; manual_process: string; personaflow_process: string; validation: string; sample_size: number; period: string; demo_flag: boolean; status: string; conclusion: string }
-export type SyncEvent = { id: string; integration: string; mode: string; status: string; summary: string; created_at: string; details: Record<string, number> }
+export type SyncEvent = { id: string; integration: string; mode: string; status: string; summary: string; created_at: string; details: Record<string, number>; retry_count?: number; last_error?: string; retried_at?: string }
 export type IntegrationStatus = { name: string; label: string; mode: string; connected: boolean; ready: boolean; notice: string; record_count: number }
 export type NotificationPreview = { id: string; channel: string; title: string; body: string; status: string; created_at: string; demo_flag: boolean }
 export type ApprovalPreview = { id: string; type: string; title: string; status: string; requester: string; created_at: string; demo_flag: boolean }
-export type AuditEvent = { id: string; actor: string; role: string; action: string; object_type: string; object_id: string; before: unknown; after: unknown; knowledge_version: string; demo_flag: boolean; workspace_id: string; created_at: string }
+export type AuditEvent = { id: string; actor: string; role: string; action: string; object_type: string; object_id: string; before: unknown; after: unknown; knowledge_version: string; verification_version?: number; demo_flag: boolean; workspace_id: string; created_at: string }
 export type DemoScenario = { id: string; name: string; description: string }
 
 export type EnterpriseWorkspace = {

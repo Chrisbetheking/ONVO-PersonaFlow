@@ -16,13 +16,14 @@ from .services.compliance import check_content
 from .services.content_engine import generate_content
 from .services.lead_engine import analyze as analyze_leads
 from .services.llm_provider import enhance_result, is_enabled, provider_status, rewrite_text
+from .services.verification import issue_verification_token
 from .services.store import get_vehicle, vehicles
 from .services.enterprise import (
     create_promise, customer_action, customer_risk_action, employee_response, enterprise_snapshot,
     get_hotspot, get_knowledge, hotspot_action, impact_action, integration_sync, list_customers,
     list_hotspots, list_knowledge, list_promises, list_quality, manager_quality_decision,
-    publish_best_practice, best_practice_action, reset_scenario, simulate_feishu_change, simulate_promise_time,
-    switch_role, update_promise,
+    publish_best_practice, best_practice_action, convert_followup_event, reset_scenario, retry_sync_event,
+    simulate_feishu_change, simulate_promise_time, switch_role, update_promise,
 )
 from .services.workspace import (
     add_followup_event,
@@ -49,7 +50,7 @@ from .services.workspace import (
     mutate_state,
 )
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 KNOWLEDGE_VERSION = "onvo-cn-2026.07.18"
 
 app = FastAPI(
@@ -137,6 +138,12 @@ class FollowupEventRequest(BaseModel):
     scheduled_at: str = Field(default="", max_length=100)
     items: list[str] = Field(default_factory=list, max_length=30)
     notes: str = Field(default="", max_length=1000)
+    source_label: str = Field(default="", max_length=200)
+    sync_status: str = Field(default="", max_length=100)
+    task_id: str = Field(default="", max_length=200)
+    variant_id: str = Field(default="", max_length=200)
+    verification_version: int = 0
+    verification_token: str = Field(default="", max_length=300)
 
 
 class MemoryToggleRequest(BaseModel):
@@ -168,6 +175,7 @@ class DraftRequest(BaseModel):
     knowledge_version: str = KNOWLEDGE_VERSION
     verification_version: int = 1
     verified_at: str = ""
+    verification_token: str = ""
     version_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -267,6 +275,16 @@ class BestPracticeActionRequest(BaseModel):
 
 class RiskActionRequest(BaseModel):
     action: str
+    note: str = ""
+
+
+class ConversationConvertRequest(BaseModel):
+    action: str
+    note: str = ""
+
+
+class SyncRetryRequest(BaseModel):
+    reason: str = "手动重试"
 
 
 class ScenarioRequest(BaseModel):
@@ -293,6 +311,25 @@ def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=str(exc))
     return HTTPException(status_code=500, detail=str(exc))
+
+
+def _stamp_variant_verification(task_id: str, variant: dict[str, Any], knowledge_version: str, verified_at: str) -> dict[str, Any]:
+    verification_version = int(variant.get("verification_version") or 1)
+    variant.update({
+        "verification_status": "verified",
+        "compliance_status": "verified",
+        "knowledge_version": knowledge_version,
+        "verification_version": verification_version,
+        "verified_at": verified_at,
+        "verification_token": issue_verification_token(
+            task_id=task_id, variant_id=variant.get("id", ""), platform=variant.get("platform", ""),
+            title=variant.get("title", ""), body=variant.get("body", ""),
+            call_to_action=variant.get("call_to_action", ""), verification_version=verification_version,
+            knowledge_version=knowledge_version,
+        ),
+        "version_history": variant.get("version_history") or [{"type": "generated", "at": verified_at, "version": verification_version}],
+    })
+    return variant
 
 
 def _task_from_variant(
@@ -356,6 +393,8 @@ async def _generate_campaign_task(
                 campaign_name=campaign["name"],
                 campaign_brief=campaign["brief"],
             )
+        for variant in result.get("variants", []):
+            _stamp_variant_verification(result["task_id"], variant, result["audit"].get("knowledge_version", KNOWLEDGE_VERSION), result["audit"].get("generated_at", ""))
         return _task_from_variant(
             campaign_id=campaign["id"],
             result=result,
@@ -460,6 +499,13 @@ def append_followup_event(customer_id: str, request: FollowupEventRequest, works
     except Exception as exc:
         raise _http_error(exc) from exc
 
+@app.post("/api/followups/{customer_id}/events/{event_id}/convert")
+def convert_customer_event(customer_id: str, event_id: str, request: ConversationConvertRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try:
+        return convert_followup_event(workspace_id, customer_id, event_id, request.action, request.note)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
 
 @app.post("/api/followups/{customer_id}/memories/{memory_id}")
 def set_memory_active(customer_id: str, memory_id: str, request: MemoryToggleRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
@@ -542,6 +588,26 @@ def submit_campaign_task_review(campaign_id: str, task_id: str, workspace_id: Wo
         if not result:
             raise ValueError("失败任务没有可提交的内容")
         variant = result["variant"]
+        if not variant.get("verification_token"):
+            _stamp_variant_verification(
+                result.get("task_id") or task_id,
+                variant,
+                result.get("audit", {}).get("knowledge_version", KNOWLEDGE_VERSION),
+                result.get("audit", {}).get("generated_at", ""),
+            )
+        draft_payload = {
+            "task_id": result["task_id"], "variant_id": variant["id"], "platform": variant["platform"],
+            "title": variant["title"], "body": variant["body"], "call_to_action": variant["call_to_action"],
+            "claims": variant.get("claims", []), "risk_annotations": variant.get("risk_annotations", []),
+            "evidence": result.get("evidence", []), "status": "draft",
+            "verification_status": variant.get("verification_status", "verified"),
+            "compliance_status": variant.get("compliance_status", "verified"),
+            "knowledge_version": variant.get("knowledge_version", KNOWLEDGE_VERSION),
+            "verification_version": variant.get("verification_version", 1),
+            "verified_at": variant.get("verified_at", ""), "verification_token": variant.get("verification_token", ""),
+            "version_history": variant.get("version_history", []),
+        }
+        save_draft(workspace_id, draft_payload)
         review = submit_review(workspace_id, {
             "task_id": result["task_id"],
             "variant_id": variant["id"],
@@ -559,6 +625,13 @@ def submit_campaign_task_review(campaign_id: str, task_id: str, workspace_id: Wo
             "risk_level": "high" if any(risk.get("level") == "block" for risk in variant.get("risk_annotations", [])) else "medium" if variant.get("risk_annotations") else "low",
             "reason": variant.get("risk_annotations", [{}])[0].get("reason", "批量内容抽样进入门店审核。") if variant.get("risk_annotations") else "批量内容抽样进入门店审核。",
             "evidence_status": "已绑定" if result.get("evidence") else "缺少事实",
+            "verification_status": variant.get("verification_status", "verified"),
+            "compliance_status": variant.get("compliance_status", "verified"),
+            "knowledge_version": variant.get("knowledge_version", KNOWLEDGE_VERSION),
+            "verification_version": variant.get("verification_version", 1),
+            "verified_at": variant.get("verified_at", ""),
+            "verification_token": variant.get("verification_token", ""),
+            "version_history": variant.get("version_history", []),
         })
         updated = {**task, "status": "submitted", "review_id": review["id"]}
         update_campaign_task(workspace_id, campaign_id, task_id, updated)
@@ -569,7 +642,10 @@ def submit_campaign_task_review(campaign_id: str, task_id: str, workspace_id: Wo
 
 @app.post("/api/drafts/save")
 def draft_save(request: DraftRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    return save_draft(workspace_id, request.model_dump())
+    try:
+        return save_draft(workspace_id, request.model_dump())
+    except Exception as exc:
+        raise _http_error(exc) from exc
 
 
 @app.post("/api/drafts/submit-review")
@@ -630,14 +706,11 @@ async def content_generate(request: GenerateRequest, workspace_id: WorkspaceId) 
         else:
             result["audit"]["ai_warning"] = "尚未配置可用的大模型，已使用规则与事实库生成基础版本。"
     for variant in result.get("variants", []):
-        variant.update({
-            "verification_status": "verified",
-            "compliance_status": "verified",
-            "knowledge_version": result.get("audit", {}).get("knowledge_version", KNOWLEDGE_VERSION),
-            "verification_version": 1,
-            "verified_at": result.get("audit", {}).get("generated_at", ""),
-            "version_history": [{"type": "generated", "at": result.get("audit", {}).get("generated_at", ""), "version": 1}],
-        })
+        _stamp_variant_verification(
+            result.get("task_id", ""), variant,
+            result.get("audit", {}).get("knowledge_version", KNOWLEDGE_VERSION),
+            result.get("audit", {}).get("generated_at", ""),
+        )
     return result
 
 
@@ -689,6 +762,8 @@ async def content_batch_generate(request: BatchGenerateRequest, workspace_id: Wo
                     )
                 except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                     warnings.append(f"{advisor['name']}：{exc}")
+            for variant in result.get("variants", []):
+                _stamp_variant_verification(result["task_id"], variant, result["audit"].get("knowledge_version", KNOWLEDGE_VERSION), result["audit"].get("generated_at", ""))
             results.append(result)
             tasks.extend(_task_from_variant(campaign_id=campaign_id, result=result, variant=variant, advisor=advisor) for variant in result["variants"])
         except Exception as exc:
@@ -766,9 +841,15 @@ def content_revalidate(request: ContentRevalidateRequest, workspace_id: Workspac
             "suggestion": "具体配置、价格与权益以发布当天乐道官方最新信息为准。",
         }]
     verified_at = datetime.now().isoformat(timespec="seconds")
+    verification_version = request.version + 1
     variant.update({
         "verification_status": "verified", "compliance_status": "verified", "knowledge_version": KNOWLEDGE_VERSION,
-        "verification_version": request.version + 1, "verified_at": verified_at,
+        "verification_version": verification_version, "verified_at": verified_at,
+        "verification_token": issue_verification_token(
+            task_id=request.task_id, variant_id=request.variant_id, platform=request.platform, title=request.title,
+            body=request.body, call_to_action=request.call_to_action, verification_version=verification_version,
+            knowledge_version=KNOWLEDGE_VERSION,
+        ),
         "version_history": [{"type": "revalidated", "at": verified_at, "knowledge_version": KNOWLEDGE_VERSION}],
     })
     return {"variant": variant, "evidence": evidence, "compliance": compliance, "verification": {"status": "verified", "at": verified_at, "knowledge_version": KNOWLEDGE_VERSION, "method": "规则 + 官方事实"}}
@@ -802,7 +883,23 @@ def review_revalidate(review_id: str, request_update: ReviewRevalidateRequest, w
         target["knowledge_version"] = checked["verification"]["knowledge_version"]
         target["verification_version"] = checked["variant"]["verification_version"]
         target["verified_at"] = checked["verification"]["at"]
+        target["verification_token"] = checked["variant"].get("verification_token", "")
         target.setdefault("version_history", []).append({"type": "manager_revalidated", "at": checked["verification"]["at"], "body": target["reviewed_body"]})
+        current.setdefault("audit_log", []).insert(0, {
+            "id": f"audit-{uuid4().hex[:10]}",
+            "actor": "门店经理 Demo",
+            "role": "门店经理空间",
+            "action": "经理重新核验审核内容",
+            "object_type": "review",
+            "object_id": review_id,
+            "before": {"verification_status": review.get("verification_status"), "verification_version": review.get("verification_version")},
+            "after": {"verification_status": "verified", "verification_version": target["verification_version"]},
+            "knowledge_version": target["knowledge_version"],
+            "verification_version": target["verification_version"],
+            "demo_flag": True,
+            "workspace_id": workspace_id,
+            "created_at": checked["verification"]["at"],
+        })
         return target
     return mutate_state(workspace_id, mutation)
 
@@ -855,6 +952,15 @@ def feishu_simulate_change(request: FeishuChangeRequest, workspace_id: Workspace
 def integration_demo_sync(name: str, workspace_id: WorkspaceId) -> dict[str, Any]:
     try: return integration_sync(workspace_id, name)
     except Exception as exc: raise _http_error(exc) from exc
+
+@app.post("/api/sync-events/{event_id}/retry")
+def sync_event_retry(event_id: str, request: SyncRetryRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
+    try:
+        result = retry_sync_event(workspace_id, event_id)
+        result["retry_reason"] = request.reason
+        return result
+    except Exception as exc:
+        raise _http_error(exc) from exc
 
 
 @app.post("/api/knowledge-impacts/{impact_id}/actions")
@@ -930,7 +1036,7 @@ def best_practice_update(practice_id: str, request: BestPracticeActionRequest, w
 
 @app.post("/api/customer-risks/{risk_id}/actions")
 def customer_risk_update(risk_id: str, request: RiskActionRequest, workspace_id: WorkspaceId) -> dict[str, Any]:
-    try: return customer_risk_action(workspace_id, risk_id, request.action)
+    try: return customer_risk_action(workspace_id, risk_id, request.action, request.note)
     except Exception as exc: raise _http_error(exc) from exc
 
 

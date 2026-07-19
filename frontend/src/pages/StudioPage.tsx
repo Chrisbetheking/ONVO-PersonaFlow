@@ -217,13 +217,24 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
   }
 
   async function markSent() {
-    if (!opportunity?.customer || !activeVariant) return
+    if (!opportunity?.customer || !activeVariant || !generation) return
+    if (activeVariant.verification_status !== 'verified' || activeVariant.compliance_status !== 'verified') {
+      showToast('内容已发生变化，请重新核验后再记录发送')
+      return
+    }
+    await saveVariant(activeVariant)
     await addFollowupEvent(opportunity.customer.id, {
       type: 'advisor_sent',
       actor: advisor?.name || '顾问',
       title: `已发送${activeVariant.platform}内容`,
       content: activeVariant.body,
       status: 'completed',
+      source_label: '顾问确认发送 · 演示记录',
+      sync_status: '本地工作区已记录',
+      task_id: generation.task_id,
+      variant_id: activeVariant.id,
+      verification_version: activeVariant.verification_version,
+      verification_token: activeVariant.verification_token,
     })
     await updateOpportunityStatus(opportunity.id, 'done')
     showToast('已记录发送，并进入客户跟进时间线')
@@ -292,13 +303,13 @@ export function StudioPage({ params }: { params: URLSearchParams }) {
             />
             <div className="studio-lower-actions">
               <button data-testid="video-package-toggle" onClick={() => setShowVideo(value => !value)}><Film size={17} />{showVideo ? '收起短视频方案' : '查看短视频方案'}<ChevronRight className={showVideo ? 'rotate-90' : ''} size={15} /></button>
-              {opportunity?.customer ? <Button data-testid="mark-content-sent" variant="secondary" onClick={() => void markSent()}><MessageCircleReply size={16} />记录为已发送并进入跟进</Button> : null}
+              {opportunity?.customer ? <Button data-testid="mark-content-sent" variant="secondary" disabled={activeVariant.verification_status !== 'verified' || activeVariant.compliance_status !== 'verified'} onClick={() => void markSent()}><MessageCircleReply size={16} />记录为已发送并进入跟进</Button> : null}
             </div>
             {showVideo ? <VideoPackage generation={generation} advisorId={advisor!.id} onStart={startVideo} /> : null}
           </div>
 
           <aside className="trust-panel">
-            <section><div className="panel-title"><strong>事实依据</strong><span>{generation.evidence.length} 条</span></div><EvidencePanel evidence={generation.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} /></section>
+            <section><div className="panel-title"><strong>事实依据</strong><span>{generation.evidence.length} 条</span></div><EvidencePanel evidence={generation.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} verificationStatus={activeVariant.verification_status} /></section>
             <section><div className="panel-title"><strong>风险与发布检查</strong><span>{activeVariant.risk_annotations.length} 项</span></div><RiskPanel risks={activeVariant.risk_annotations} activeId={activeRiskId} onSelect={setActiveRiskId} onApplySuggestion={applyRiskSuggestion} /></section>
           </aside>
         </div>

@@ -20,6 +20,26 @@ def _find(items: list[dict[str, Any]], item_id: str, label: str) -> dict[str, An
     raise KeyError(f"Unknown {label}: {item_id}")
 
 
+def _audit_event(state: dict[str, Any], workspace_id: str, *, actor: str, role: str, action: str, object_type: str, object_id: str, before: Any = None, after: Any = None, knowledge_version: str = "", verification_version: int = 0) -> None:
+    state.setdefault("audit_log", []).insert(0, {
+        "id": f"audit-{uuid4().hex[:10]}", "actor": actor, "role": role, "action": action,
+        "object_type": object_type, "object_id": object_id, "before": copy.deepcopy(before), "after": copy.deepcopy(after),
+        "knowledge_version": knowledge_version, "verification_version": verification_version, "demo_flag": True,
+        "workspace_id": workspace_id, "created_at": _now(),
+    })
+
+
+def _append_followup_event(state: dict[str, Any], customer_id: str, *, event_type: str, actor: str, title: str, content: str, status: str = "completed", source_label: str = "系统事件") -> None:
+    followup = next((item for item in state.get("followups", []) if item.get("customer_id") == customer_id), None)
+    if not followup:
+        return
+    followup.setdefault("events", []).append({
+        "id": f"event-{uuid4().hex[:8]}", "type": event_type, "actor": actor, "time": datetime.now().strftime("今天 %H:%M"),
+        "title": title, "content": content, "status": status, "source_label": source_label,
+        "sync_status": "本地记录", "source_detail": "当前 workspace",
+    })
+
+
 def enterprise_snapshot(workspace_id: str) -> dict[str, Any]:
     state = snapshot(workspace_id)
     keys = [
@@ -64,7 +84,7 @@ def get_hotspot(workspace_id: str, hotspot_id: str) -> dict[str, Any]:
 
 
 def hotspot_action(workspace_id: str, hotspot_id: str, action: str, reason: str = "") -> dict[str, Any]:
-    allowed = {"content_task", "customer_outreach", "knowledge_draft", "coaching", "manager_review", "ignore"}
+    allowed = {"content_task", "customer_outreach", "knowledge_draft", "coaching", "manager_review", "campaign", "customer_segment", "ignore"}
     if action not in allowed:
         raise ValueError("Unsupported hotspot action")
 
@@ -89,6 +109,32 @@ def hotspot_action(workspace_id: str, hotspot_id: str, action: str, reason: str 
                 "created_by": hotspot["owner"], "reviewed_by": "", "updated_at": _now(), "replacement_id": "",
                 "linked_content_count": 0, "linked_customer_count": 0, "demo_flag": True,
                 "versions": [{"id": f"kv-{uuid4().hex[:8]}", "version": "0.1", "content": hotspot["recommended_action"], "status": "draft", "created_at": _now(), "source": "热点雷达 Demo", "created_by": hotspot["owner"]}],
+            })
+        elif action == "campaign":
+            state.setdefault("campaigns", []).insert(0, {
+                "id": created_id,
+                "name": f"热点活动 · {hotspot['title']}",
+                "vehicle_id": hotspot["vehicle_ids"][0],
+                "brief": hotspot["recommended_action"],
+                "status": "draft",
+                "target_advisors": ["advisor-hz-02"],
+                "platforms": ["朋友圈", "小红书"],
+                "tasks": [],
+                "task_summary": {"total": 0, "ready": 0, "pending_review": 0, "failed": 0},
+                "created_at": _now(),
+                "source": "热点雷达 Demo",
+                "demo_flag": True,
+            })
+        elif action == "customer_segment":
+            state.setdefault("customer_segments", []).insert(0, {
+                "id": created_id,
+                "name": f"热点客群 · {hotspot['title']}",
+                "hotspot_id": hotspot_id,
+                "customer_ids": [item.get("id") for item in state.get("customer_profiles", [])[:3]],
+                "criteria": hotspot.get("audiences", []),
+                "status": "ready",
+                "created_at": _now(),
+                "demo_flag": True,
             })
         elif action in {"coaching", "manager_review"}:
             state.setdefault("quality_signals", []).append({
@@ -205,12 +251,17 @@ def customer_action(workspace_id: str, customer_id: str, action_id: str, action:
     allowed = {"accept", "modify", "delay", "ignore", "escalate", "complete"}
     if action not in allowed:
         raise ValueError("Unsupported customer action")
+    if action in {"modify", "delay", "ignore", "escalate"} and not note.strip():
+        raise ValueError("该操作需要填写原因或说明")
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         customer = _find(state["customer_profiles"], customer_id, "customer")
         next_action = _find(customer["next_best_actions"], action_id, "next best action")
+        before = copy.deepcopy(next_action)
         next_action["status"] = {"accept":"accepted","modify":"modified","delay":"delayed","ignore":"ignored","escalate":"escalated","complete":"completed"}[action]
         next_action["note"] = note
         next_action["updated_at"] = _now()
+        _append_followup_event(state, customer_id, event_type="next_best_action", actor="顾问演示用户", title=f"下一最佳行动：{action}", content=f"{next_action['action']}。{note}".strip(), source_label="客户 360")
+        _audit_event(state, workspace_id, actor="顾问演示用户", role="顾问空间", action=f"下一最佳行动：{action}", object_type="next_best_action", object_id=action_id, before=before, after=next_action)
         return customer
     return mutate_state(workspace_id, mutation)
 
@@ -221,21 +272,56 @@ def list_promises(workspace_id: str) -> list[dict[str, Any]]:
 
 def create_promise(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     customer_id = str(payload.get("customer_id") or "")
-    advisor_id = str(payload.get("advisor_id") or "")
-    if not customer_id or not advisor_id:
-        raise ValueError("customer_id and advisor_id are required")
-    get_advisor(workspace_id, advisor_id)
-    promise = {
-        "id": f"promise-{uuid4().hex[:8]}", "customer_id": customer_id, "advisor_id": advisor_id,
-        "original_message": str(payload.get("original_message") or payload.get("commitment") or ""),
-        "commitment": str(payload.get("commitment") or ""), "due_at": str(payload.get("due_at") or ""),
-        "completion_criteria": str(payload.get("completion_criteria") or "顾问确认完成"), "status": "pending_confirmation",
-        "source": str(payload.get("source") or "手动创建 Demo"), "created_at": _now(), "remind_at": str(payload.get("remind_at") or ""),
-        "overdue": False, "manager_attention": False, "evidence": [], "demo_flag": True,
-    }
+    if not customer_id:
+        raise ValueError("customer_id is required")
+
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        customer = _find(state["customer_profiles"], customer_id, "customer")
+        advisor_id = str(customer.get("advisor_id") or "")
+        advisor = _find(state["advisors"], advisor_id, "advisor")
+        promise = {
+            "id": f"promise-{uuid4().hex[:8]}",
+            "customer_id": customer_id,
+            "advisor_id": advisor_id,
+            "original_message": str(payload.get("original_message") or payload.get("commitment") or ""),
+            "source_event_id": str(payload.get("source_event_id") or ""),
+            "commitment": str(payload.get("commitment") or ""),
+            "due_at": str(payload.get("due_at") or ""),
+            "completion_criteria": str(payload.get("completion_criteria") or "顾问确认完成"),
+            "status": "pending_confirmation",
+            "source": str(payload.get("source") or "手动创建 Demo"),
+            "created_at": _now(),
+            "remind_at": str(payload.get("remind_at") or ""),
+            "overdue": False,
+            "manager_attention": False,
+            "evidence": [],
+            "demo_flag": True,
+        }
+        if not promise["commitment"].strip() or not promise["due_at"].strip():
+            raise ValueError("承诺事项和截止时间不能为空")
         state["promises"].insert(0, promise)
+        _append_followup_event(
+            state,
+            customer_id,
+            event_type="promise_created",
+            actor=advisor["name"],
+            title="沟通内容已转为待确认承诺",
+            content=promise["commitment"],
+            status="pending_confirmation",
+            source_label=promise["source"],
+        )
+        _audit_event(
+            state,
+            workspace_id,
+            actor=advisor["name"],
+            role="顾问空间",
+            action="创建客户承诺",
+            object_type="promise",
+            object_id=promise["id"],
+            after=promise,
+        )
         return promise
+
     return mutate_state(workspace_id, mutation)
 
 
@@ -244,19 +330,34 @@ def update_promise(workspace_id: str, promise_id: str, action: str, payload: dic
     allowed = {"confirm", "reschedule", "complete", "delay", "cancel", "request_manager", "manager_remind", "dismiss"}
     if action not in allowed:
         raise ValueError("Unsupported promise action")
+    if action in {"reschedule", "delay", "cancel"} and not str(payload.get("reason") or "").strip():
+        raise ValueError("修改、延期或取消承诺时必须填写原因")
+    if action == "reschedule" and not str(payload.get("due_at") or "").strip():
+        raise ValueError("改期必须填写新的截止时间")
+    if action == "complete" and not str(payload.get("evidence") or "").strip():
+        raise ValueError("标记完成必须填写完成证据或备注")
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         promise = _find(state["promises"], promise_id, "promise")
+        before = copy.deepcopy(promise)
+        advisor = get_advisor(workspace_id, promise["advisor_id"])
         if action == "confirm": promise["status"] = "pending_execution"
-        elif action == "reschedule": promise["due_at"] = str(payload.get("due_at") or promise["due_at"]); promise["status"] = "pending_execution"
-        elif action == "complete": promise["status"] = "completed"; promise["completed_at"] = _now(); promise["evidence"].append(str(payload.get("evidence") or "顾问手动确认完成"))
-        elif action == "delay": promise["status"] = "delayed"; promise["delay_reason"] = str(payload.get("reason") or "")
-        elif action == "cancel": promise["status"] = "cancelled"; promise["cancel_reason"] = str(payload.get("reason") or "")
-        elif action == "request_manager": promise["manager_attention"] = True
+        elif action == "reschedule":
+            promise["due_at"] = str(payload.get("due_at")); promise["reschedule_reason"] = str(payload.get("reason")); promise["status"] = "pending_execution"
+        elif action == "complete":
+            promise["status"] = "completed"; promise["completed_at"] = _now(); promise["overdue"] = False; promise["manager_attention"] = False; promise["evidence"].append(str(payload.get("evidence")))
+        elif action == "delay": promise["status"] = "delayed"; promise["delay_reason"] = str(payload.get("reason"))
+        elif action == "cancel": promise["status"] = "cancelled"; promise["cancel_reason"] = str(payload.get("reason"))
+        elif action == "request_manager": promise["manager_attention"] = True; promise["manager_attention_reason"] = str(payload.get("reason") or "顾问请求协助")
         elif action == "manager_remind":
             promise["manager_attention"] = True
             state.setdefault("notifications", []).insert(0, {"id":f"notice-{uuid4().hex[:8]}","channel":"飞书机器人 Demo","title":"经理提醒：客户承诺待处理","body":promise["commitment"],"status":"preview","created_at":_now(),"demo_flag":True})
         elif action == "dismiss": promise["manager_attention"] = False
         promise["updated_at"] = _now()
+        label = {"confirm":"确认承诺","reschedule":"调整承诺截止时间","complete":"完成承诺","delay":"延期承诺","cancel":"取消承诺","request_manager":"请求经理协助","manager_remind":"经理提醒","dismiss":"经理确认无需处理"}[action]
+        _append_followup_event(state, promise["customer_id"], event_type="promise_completed" if action == "complete" else "promise_updated", actor=advisor["name"] if action not in {"manager_remind", "dismiss"} else "门店经理 Demo", title=label, content=f"{promise['commitment']} · {payload.get('reason') or payload.get('evidence') or ''}".strip(" ·"), source_label="承诺台账")
+        if action == "request_manager":
+            state.setdefault("quality_signals", []).insert(0, {"id":f"quality-{uuid4().hex[:8]}","advisor_id":promise["advisor_id"],"customer_id":promise["customer_id"],"category":"承诺履约","risk_level":"medium","status":"pending_review","original_message":promise["original_message"],"trigger_rule":"顾问请求经理协助","system_explanation":promise["manager_attention_reason"],"fact_ids":[],"repeat_count":1,"employee_response":"","manager_decision":"","decision_reason":"","created_at":_now(),"demo_flag":True})
+        _audit_event(state, workspace_id, actor=advisor["name"] if action not in {"manager_remind", "dismiss"} else "门店经理 Demo", role="顾问空间" if action not in {"manager_remind", "dismiss"} else "门店经理空间", action=label, object_type="promise", object_id=promise_id, before=before, after=promise)
         return promise
     return mutate_state(workspace_id, mutation)
 
@@ -266,11 +367,17 @@ def simulate_promise_time(workspace_id: str, promise_id: str, state_name: str) -
         raise ValueError("state must be due_soon or overdue")
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         promise = _find(state["promises"], promise_id, "promise")
+        before = copy.deepcopy(promise)
         promise["due_at"] = (datetime.now() + (timedelta(minutes=30) if state_name == "due_soon" else timedelta(hours=-2))).isoformat(timespec="minutes")
         promise["overdue"] = state_name == "overdue"
+        promise["manager_attention"] = state_name == "overdue" or promise.get("manager_attention", False)
         promise["status"] = "overdue" if state_name == "overdue" else "pending_execution"
         notice = {"id":f"notice-{uuid4().hex[:8]}","channel":"飞书机器人 Demo","title":"承诺已超时" if promise["overdue"] else "承诺即将到期","body":promise["commitment"],"status":"preview","created_at":_now(),"demo_flag":True}
         state.setdefault("notifications", []).insert(0, notice)
+        if promise["overdue"]:
+            state.setdefault("quality_signals", []).insert(0, {"id":f"quality-{uuid4().hex[:8]}","advisor_id":promise["advisor_id"],"customer_id":promise["customer_id"],"category":"承诺未履行","risk_level":"high","status":"pending_review","original_message":promise["original_message"],"trigger_rule":"承诺超过截止时间","system_explanation":"承诺已超时，需要经理确认是否提醒或辅导。","fact_ids":[],"repeat_count":1,"employee_response":"","manager_decision":"","decision_reason":"","created_at":_now(),"demo_flag":True})
+        _append_followup_event(state, promise["customer_id"], event_type="promise_overdue" if promise["overdue"] else "promise_due_soon", actor="系统 Demo", title=notice["title"], content=promise["commitment"], source_label="飞书提醒 Demo 预览")
+        _audit_event(state, workspace_id, actor="场景模拟器", role="角色演示", action=notice["title"], object_type="promise", object_id=promise_id, before=before, after=promise)
         return {"promise": promise, "notification": notice}
     return mutate_state(workspace_id, mutation)
 
@@ -286,6 +393,7 @@ def employee_response(workspace_id: str, signal_id: str, response: str, improvem
         signal["improvement_plan"] = improvement_plan
         signal["status"] = "employee_responded"
         signal["employee_responded_at"] = _now()
+        _audit_event(state, workspace_id, actor=get_advisor(workspace_id, signal["advisor_id"])["name"], role="顾问空间", action="补充质量复核上下文", object_type="quality_signal", object_id=signal_id, after=signal)
         return signal
     return mutate_state(workspace_id, mutation)
 
@@ -307,6 +415,7 @@ def manager_quality_decision(workspace_id: str, signal_id: str, decision: str, r
         elif decision == "best_practice":
             created = {"id": f"practice-{uuid4().hex[:8]}", "scenario": signal["category"], "customer_question": signal["original_message"], "advisor_approach": signal["system_explanation"], "why_effective": reason or "经理确认该处理方式值得复用。", "result": "待补充", "audiences": [], "vehicle_ids": [], "not_for": [], "reviewer": "门店经理 Demo", "source": "质量信号转候选", "anonymous": True, "status": "candidate", "demo_flag": True}
             state.setdefault("best_practices", []).insert(0, created)
+        _audit_event(state, workspace_id, actor="门店经理 Demo", role="门店经理空间", action=f"质量复核决定：{decision}", object_type="quality_signal", object_id=signal_id, after={"signal": signal, "created": created})
         return {"signal": signal, "created": created}
     return mutate_state(workspace_id, mutation)
 
@@ -351,14 +460,26 @@ def best_practice_action(workspace_id: str, practice_id: str, action: str) -> di
         return practice
     return mutate_state(workspace_id, mutation)
 
-def customer_risk_action(workspace_id: str, risk_id: str, action: str) -> dict[str, Any]:
-    allowed = {"assign_manager", "create_followup", "resolve", "snooze"}
+def customer_risk_action(workspace_id: str, risk_id: str, action: str, note: str = "") -> dict[str, Any]:
+    allowed = {"assign_manager", "assign_advisor", "create_followup", "create_explanation", "create_promise", "false_positive", "resolve", "close", "snooze"}
     if action not in allowed:
         raise ValueError("Unsupported customer risk action")
+    if action == "false_positive" and not note.strip():
+        raise ValueError("标记误报必须填写原因")
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         risk = _find(state["customer_risks"], risk_id, "customer risk")
-        risk["status"] = {"assign_manager":"manager_assigned","create_followup":"followup_created","resolve":"resolved","snooze":"snoozed"}[action]
+        before = copy.deepcopy(risk)
+        risk["status"] = {"assign_manager":"manager_assigned","assign_advisor":"advisor_assigned","create_followup":"followup_created","create_explanation":"explanation_task_created","create_promise":"promise_created","false_positive":"false_positive","resolve":"resolved","close":"closed","snooze":"snoozed"}[action]
+        risk["note"] = note
         risk["updated_at"] = _now()
+        if action == "create_followup":
+            _append_followup_event(state, risk["customer_id"], event_type="manager_followup", actor="门店经理 Demo", title="经理创建客户跟进任务", content=risk["recommended_action"], source_label="客户风险")
+        elif action == "create_explanation":
+            state["opportunities"].insert(0, {"id":f"risk-task-{uuid4().hex[:8]}","kind":"customer","priority":"high","status":"pending","title":"客户风险解释任务","source":"客户风险","source_type":"客户风险","why_now":risk["reason"],"signal":risk["evidence"][0] if risk.get("evidence") else risk["reason"],"recommended_action":risk["recommended_action"],"due_label":risk["due_at"],"due_at":risk["due_at"],"advisor_id":next((c["advisor_id"] for c in state["customer_profiles"] if c["id"]==risk["customer_id"]),"advisor-hz-02"),"owner":"当前负责顾问","impact_label":"1 位客户","manager_help":True,"vehicle_id":"onvo-l80","campaign_id":None,"customer":None})
+        elif action == "create_promise":
+            customer = _find(state["customer_profiles"], risk["customer_id"], "customer")
+            state["promises"].insert(0, {"id":f"promise-{uuid4().hex[:8]}","customer_id":customer["id"],"advisor_id":customer["advisor_id"],"original_message":risk["reason"],"commitment":risk["recommended_action"],"due_at":risk["due_at"],"completion_criteria":"顾问提交处理结果","status":"pending_confirmation","source":"客户风险转承诺","created_at":_now(),"remind_at":"","overdue":False,"manager_attention":True,"evidence":risk.get("evidence",[]),"demo_flag":True})
+        _audit_event(state, workspace_id, actor="门店经理 Demo", role="门店经理空间", action=f"客户风险处理：{action}", object_type="customer_risk", object_id=risk_id, before=before, after=risk)
         return risk
     return mutate_state(workspace_id, mutation)
 
@@ -369,6 +490,49 @@ def integration_sync(workspace_id: str, name: str) -> dict[str, Any]:
         state.setdefault("sync_events", []).insert(0, result)
         state["enterprise_meta"]["last_sync_at"] = result["created_at"]
         return result
+    return mutate_state(workspace_id, mutation)
+
+
+def retry_sync_event(workspace_id: str, event_id: str) -> dict[str, Any]:
+    def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        event = _find(state["sync_events"], event_id, "sync event")
+        before = copy.deepcopy(event)
+        event["status"] = "success"
+        event["summary"] = f"重试成功：{event.get('summary', '')}"
+        event["retry_count"] = int(event.get("retry_count") or 0) + 1
+        event["retried_at"] = _now()
+        _audit_event(state, workspace_id, actor="系统管理员 Demo", role="总部运营空间", action="重试同步事件", object_type="sync_event", object_id=event_id, before=before, after=event)
+        return event
+    return mutate_state(workspace_id, mutation)
+
+
+def convert_followup_event(workspace_id: str, customer_id: str, event_id: str, action: str, note: str = "") -> dict[str, Any]:
+    allowed = {"memory", "concern", "promise", "next_action", "manager_help"}
+    if action not in allowed:
+        raise ValueError("Unsupported conversation conversion")
+    def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        followup = next((item for item in state["followups"] if item.get("customer_id") == customer_id), None)
+        if not followup:
+            raise KeyError(f"Unknown followup: {customer_id}")
+        event = _find(followup["events"], event_id, "followup event")
+        customer = _find(state["customer_profiles"], customer_id, "customer")
+        result: dict[str, Any]
+        if action in {"memory", "concern"}:
+            memory = {"id":f"memory-{uuid4().hex[:8]}","scope":"customer","title":"客户顾虑" if action=="concern" else "客户记忆","value":note.strip() or event["content"],"source":f"客户沟通事件 {event_id}","updated_at":datetime.now().strftime("%Y-%m-%d %H:%M"),"active":True}
+            followup.setdefault("memories", []).append(memory)
+            if action == "concern" and memory["value"] not in customer["state"].setdefault("concerns", []): customer["state"]["concerns"].append(memory["value"])
+            result = memory
+        elif action == "promise":
+            promise = {"id":f"promise-{uuid4().hex[:8]}","customer_id":customer_id,"advisor_id":customer["advisor_id"],"original_message":event["content"],"source_event_id":event_id,"commitment":note.strip() or "根据客户消息完成后续确认","due_at":(datetime.now()+timedelta(days=1)).isoformat(timespec="minutes"),"completion_criteria":"顾问提交完成证据","status":"pending_confirmation","source":"客户沟通转承诺","created_at":_now(),"remind_at":"","overdue":False,"manager_attention":False,"evidence":[],"demo_flag":True}
+            state.setdefault("promises", []).insert(0,promise); result=promise
+        elif action == "next_action":
+            next_action={"id":f"nba-{uuid4().hex[:8]}","action":note.strip() or "根据客户最新消息完成下一步沟通","reason":event["content"],"due_at":"24 小时内","owner":"当前负责顾问","risk":"未及时回应会降低客户信任","required_materials":[],"manager_help":False,"status":"recommended","demo_flag":True,"created_at":_now(),"updated_at":_now()}
+            customer.setdefault("next_best_actions", []).insert(0,next_action); result=next_action
+        else:
+            signal={"id":f"quality-{uuid4().hex[:8]}","advisor_id":customer["advisor_id"],"customer_id":customer_id,"category":"经理协助","risk_level":"medium","status":"pending_review","original_message":event["content"],"trigger_rule":"顾问从客户沟通请求经理协助","system_explanation":note.strip() or "客户沟通需要经理协助判断。","fact_ids":[],"repeat_count":1,"employee_response":"","manager_decision":"","decision_reason":"","created_at":_now(),"demo_flag":True}
+            state.setdefault("quality_signals", []).insert(0,signal); result=signal
+        _audit_event(state, workspace_id, actor="顾问演示用户", role="顾问空间", action=f"客户沟通转为：{action}", object_type="followup_event", object_id=event_id, after=result)
+        return {"action": action, "created": result, "followup": followup}
     return mutate_state(workspace_id, mutation)
 
 

@@ -14,6 +14,7 @@ import { RadarPage } from '../pages/RadarPage'
 import { KnowledgePage } from '../pages/KnowledgePage'
 import { Customer360Page } from '../pages/Customer360Page'
 import { PromisesPage } from '../pages/PromisesPage'
+import { PolicyPage } from '../pages/PolicyPage'
 import { QualityPage } from '../pages/QualityPage'
 import { BestPracticesPage } from '../pages/BestPracticesPage'
 import { CustomerRiskPage } from '../pages/CustomerRiskPage'
@@ -41,6 +42,7 @@ function RoutedApp() {
     case 'quality': page = <QualityPage />; break
     case 'hotspots': page = <RadarPage mode="hq" />; break
     case 'knowledge': page = <KnowledgePage />; break
+    case 'policies': page = <PolicyPage />; break
     case 'best-practices': page = <BestPracticesPage />; break
     case 'experiments': page = <ExperimentsPage />; break
     case 'governance': page = <GovernancePage />; break

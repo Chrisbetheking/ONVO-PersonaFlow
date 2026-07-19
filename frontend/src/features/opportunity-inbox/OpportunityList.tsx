@@ -3,79 +3,23 @@ import { ArrowRight, Check, Clock3, MessageSquareText, UsersRound, WandSparkles 
 import type { Opportunity } from '../../types'
 import { Button, EmptyState, StatusPill } from '../../shared/ui'
 
-const kindIcon = {
-  customer: MessageSquareText,
-  segment: UsersRound,
-  topic: WandSparkles,
-}
+const kindIcon = { customer: MessageSquareText, segment: UsersRound, topic: WandSparkles }
+const priorityTone = { high: 'danger', medium: 'warning', low: 'neutral' } as const
 
-const priorityTone = {
-  high: 'danger',
-  medium: 'warning',
-  low: 'neutral',
-} as const
-
-export function OpportunityList({
-  items,
-  onOpen,
-  onLater,
-  onDone,
-}: {
-  items: Opportunity[]
-  onOpen: (item: Opportunity) => void
-  onLater: (item: Opportunity) => void
-  onDone: (item: Opportunity) => void
-}) {
+export function OpportunityList({ items, onOpen, onLater, onDone, onOpenHotspot }: { items: Opportunity[]; onOpen: (item: Opportunity) => void; onLater: (item: Opportunity) => void; onDone: (item: Opportunity) => void; onOpenHotspot?: (item: Opportunity) => void }) {
   const [selectedId, setSelectedId] = useState(items[0]?.id || '')
-  useEffect(() => {
-    if (!items.some(item => item.id === selectedId)) setSelectedId(items[0]?.id || '')
-  }, [items, selectedId])
-
+  const [segmentOpen, setSegmentOpen] = useState(false)
+  useEffect(() => { if (!items.some(item => item.id === selectedId)) setSelectedId(items[0]?.id || '') }, [items, selectedId])
+  useEffect(() => setSegmentOpen(false), [selectedId])
   if (!items.length) return <EmptyState title="当前筛选下没有机会" description="切换筛选条件，或查看已经完成的事项。" />
   const selected = items.find(item => item.id === selectedId) || items[0]
   const Icon = kindIcon[selected.kind]
-
-  return (
-    <div className="opportunity-workbench">
-      <div className="opportunity-queue" aria-label="今日机会队列">
-        <div className="queue-columns"><span>机会</span><span>时限</span></div>
-        {items.map(item => {
-          const RowIcon = kindIcon[item.kind]
-          return (
-            <button
-              data-testid={`opportunity-row-${item.id}`}
-              className={selected.id === item.id ? `opportunity-queue-row priority-${item.priority} active` : `opportunity-queue-row priority-${item.priority}`}
-              key={item.id}
-              onClick={() => setSelectedId(item.id)}
-            >
-              <span className="queue-icon"><RowIcon size={17} /></span>
-              <span className="queue-copy"><strong>{item.title}</strong><small>{item.source} · {item.signal}</small></span>
-              <span className="queue-due"><Clock3 size={13} />{item.due_label}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <article className="opportunity-detail" data-testid="opportunity-detail">
-        <header>
-          <span className="opportunity-detail-icon"><Icon size={21} /></span>
-          <div><p className="eyebrow">{selected.source}</p><h2>{selected.title}</h2></div>
-          <div className="detail-statuses"><StatusPill tone={priorityTone[selected.priority]}>{selected.priority === 'high' ? '优先处理' : selected.priority === 'medium' ? '建议处理' : '普通'}</StatusPill>{selected.status === 'done' ? <StatusPill tone="success">已处理</StatusPill> : null}</div>
-        </header>
-        <dl className="opportunity-properties">
-          <div><dt>为什么现在处理</dt><dd>{selected.why_now}</dd></div>
-          <div><dt>关键意向 / 顾虑</dt><dd>{selected.signal}</dd></div>
-          <div><dt>推荐行动</dt><dd>{selected.recommended_action}</dd></div>
-          {selected.customer ? <><div><dt>客户阶段</dt><dd>{selected.customer.stage}</dd></div><div><dt>最近消息</dt><dd>“{selected.customer.recent_message}”</dd></div></> : null}
-        </dl>
-        <footer>
-          <span><Clock3 size={15} />建议在{selected.due_label}完成</span>
-          <div className="opportunity-actions">
-            {selected.status !== 'done' ? <Button data-testid="start-opportunity" onClick={() => onOpen(selected)}>开始处理 <ArrowRight size={16} /></Button> : <Button variant="secondary" onClick={() => onOpen(selected)}>查看记录</Button>}
-            {selected.status !== 'done' ? <div className="row-secondary-actions"><button onClick={() => onLater(selected)}>稍后</button><button onClick={() => onDone(selected)}><Check size={14} />标记完成</button></div> : null}
-          </div>
-        </footer>
-      </article>
-    </div>
-  )
+  return <div className="opportunity-workbench">
+    <div className="opportunity-queue" aria-label="今日机会队列"><div className="queue-columns"><span>机会</span><span>时限</span></div>{items.map(item => { const RowIcon=kindIcon[item.kind]; return <button data-testid={`opportunity-row-${item.id}`} className={selected.id===item.id?`opportunity-queue-row priority-${item.priority} active`:`opportunity-queue-row priority-${item.priority}`} key={item.id} onClick={()=>setSelectedId(item.id)}><span className="queue-icon"><RowIcon size={17}/></span><span className="queue-copy"><strong>{item.title}</strong><small>{item.source_type||item.source} · {item.signal}</small></span><span className="queue-due"><Clock3 size={13}/>{item.due_label}</span></button>})}</div>
+    <article className="opportunity-detail" data-testid="opportunity-detail"><header><span className="opportunity-detail-icon"><Icon size={21}/></span><div><p className="eyebrow">{selected.source_type||selected.source}</p><h2>{selected.title}</h2></div><div className="detail-statuses"><StatusPill tone={priorityTone[selected.priority]}>{selected.priority==='high'?'优先处理':selected.priority==='medium'?'建议处理':'普通'}</StatusPill>{selected.status==='done'?<StatusPill tone="success">已处理</StatusPill>:null}</div></header>
+      <dl className="opportunity-properties"><div><dt>来源</dt><dd>{selected.source}</dd></div><div><dt>负责人</dt><dd>{selected.owner||selected.advisor_id}</dd></div><div><dt>截止时间</dt><dd>{selected.due_at||selected.due_label}</dd></div><div><dt>影响对象</dt><dd>{selected.impact_label||selected.customer?.name||'当前客群'}</dd></div><div><dt>经理协助</dt><dd>{selected.manager_help?'需要':'暂不需要'}</dd></div><div><dt>当前状态</dt><dd>{selected.status}</dd></div><div><dt>为什么现在处理</dt><dd>{selected.why_now}</dd></div><div><dt>关键意向 / 顾虑</dt><dd>{selected.signal}</dd></div><div><dt>推荐行动</dt><dd>{selected.recommended_action}</dd></div>{selected.customer?<><div><dt>客户阶段</dt><dd>{selected.customer.stage}</dd></div><div><dt>最近消息</dt><dd>“{selected.customer.recent_message}”</dd></div></>:null}</dl>
+      {selected.kind==='segment'?<section className="segment-preview"><button data-testid="toggle-segment-customers" onClick={()=>setSegmentOpen(v=>!v)}>{segmentOpen?'收起客户分群':'展开客户分群'} · {selected.segment_customers?.length||18} 位</button>{segmentOpen?<div data-testid="segment-customers">{(selected.segment_customers||[{id:'customer-chen',name:'陈女士',stage:'高意向',concern:'满员收纳'},{id:'customer-xu',name:'许先生',stage:'考虑中',concern:'通勤成本'},{id:'customer-demo-3',name:'王女士',stage:'初步了解',concern:'儿童用品'}]).map(customer=><article key={customer.id}><strong>{customer.name}</strong><span>{customer.stage}</span><small>{customer.concern||'家庭场景体验'}</small></article>)}</div>:null}</section>:null}
+      <footer><span><Clock3 size={15}/>建议在{selected.due_label}完成</span><div className="opportunity-actions">{selected.kind==='topic'&&onOpenHotspot?<Button data-testid="open-hotspot-detail" variant="secondary" onClick={()=>onOpenHotspot(selected)}>查看热点详情</Button>:null}{selected.status!=='done'?<Button data-testid="start-opportunity" onClick={()=>onOpen(selected)}>开始处理 <ArrowRight size={16}/></Button>:<Button variant="secondary" onClick={()=>onOpen(selected)}>查看记录</Button>}{selected.status!=='done'?<div className="row-secondary-actions"><button onClick={()=>onLater(selected)}>稍后</button><button onClick={()=>onDone(selected)}><Check size={14}/>标记完成</button></div>:null}</div></footer>
+    </article>
+  </div>
 }

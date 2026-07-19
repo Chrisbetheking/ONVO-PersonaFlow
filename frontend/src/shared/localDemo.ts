@@ -63,6 +63,7 @@ export function createLocalGeneration({
       knowledge_version: 'local-demo-2026.07.19',
       verification_version: 1,
       verified_at: new Date().toISOString(),
+      verification_token: `local-token-${index + 1}`,
       version_history: [{ type: 'generated', at: new Date().toISOString(), version: 1 }],
     }
   })

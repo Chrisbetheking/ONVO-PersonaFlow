@@ -66,3 +66,7 @@ completion_condition / status / source / remind_at / overdue / manager_attention
 - 原始生成、顾问编辑、重新核验、经理编辑和最终批准版本。
 
 正文或 CTA 修改后，claims 标记 stale，evidence/compliance 标记 needs_revalidation；后端重新核验前禁止提交和批准。
+
+### VerificationToken / AuditEvent
+
+核验凭证由服务端根据 task、variant、平台、标题、正文、CTA、verification_version 和 knowledge_version 签名。内容变化后旧凭证失效。审计事件保存 workspace、角色、对象、变更前后、知识版本与核验版本。

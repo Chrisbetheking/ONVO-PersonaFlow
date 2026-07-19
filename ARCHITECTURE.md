@@ -95,3 +95,7 @@ sequenceDiagram
 - 模型不可用：规则内容和事实库 fallback，不显示为模型结果。
 - 视频服务未配置：只保存脚本和分镜，状态为 preview。
 - Adapter 未配置：保持 demo 或 placeholder 状态，并显示“未连接生产系统”。
+
+## v0.4.1 核验完整性
+
+`backend/app/services/verification.py` 对内容版本签名。前端编辑只负责把状态标记为 stale；真正保存、送审、发送和批准时，FastAPI 会重新验证签名和版本。证据面板根据当前 `verification_status` 展示“已核验”或“待重新核验”。

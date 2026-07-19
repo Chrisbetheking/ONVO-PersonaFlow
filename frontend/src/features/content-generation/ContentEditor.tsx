@@ -91,8 +91,8 @@ export function ContentEditor({
       </div>
       <label className="field-label">行动引导<input data-testid="content-cta" value={variant.call_to_action} onChange={event => onChange({ call_to_action: event.target.value })} /></label>
 
-      <div className="annotated-preview">
-        <div className="preview-heading"><div><Clipboard size={16} /><strong>逐句校对</strong></div><span>点击有底色的陈述查看右侧依据或风险</span></div>
+      <div className={verified ? "annotated-preview" : "annotated-preview stale"} data-testid="annotated-preview" data-verification-status={variant.verification_status}>
+        <div className="preview-heading"><div><Clipboard size={16} /><strong>逐句校对</strong></div><span>{verified ? '点击有底色的陈述查看右侧依据或风险' : '以下为上次核验结果，仅供重新核验前定位'}</span></div>
         <p>{segments.map((segment, index) => segment.type === 'plain' ? <span key={index}>{segment.text}</span> : <button data-testid={`content-mark-${segment.type}`} key={index} className={`inline-mark inline-${segment.type}`} onClick={() => segment.type === 'claim' ? onSelectEvidence(segment.refId || '') : onSelectRisk(segment.refId || '')}>{segment.text}</button>)}</p>
       </div>
 

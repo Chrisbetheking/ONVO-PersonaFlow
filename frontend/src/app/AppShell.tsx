@@ -27,6 +27,7 @@ const roleItems: Record<RoleSpace, Array<{ id: RouteId; label: string; icon: typ
   hq: [
     { id: 'hotspots', label: '热点与洞察', icon: Target },
     { id: 'knowledge', label: '知识中心', icon: LibraryBig },
+    { id: 'policies', label: '政策与权益', icon: FileClock },
     { id: 'campaigns', label: '活动编排', icon: CalendarRange },
     { id: 'best-practices', label: '优秀案例', icon: BookOpenText },
     { id: 'experiments', label: '效果验证', icon: Gauge },
@@ -51,6 +52,11 @@ export function AppShell({ route, children }: { route: RouteId; children: ReactN
   const role = workspace.enterprise?.enterprise_meta?.current_role || 'advisor'
   const actorId = workspace.enterprise?.enterprise_meta?.current_actor_id
   const advisor = boot.advisors.find(item => item.id === actorId) || boot.advisors.find(item => item.id === 'advisor-hz-02') || boot.advisors[0]
+  const accountIdentity = role === 'advisor'
+    ? { name: advisor?.name || '顾问演示用户', detail: `${advisor?.store || '演示门店'} · 顾问` }
+    : role === 'manager'
+      ? { name: '门店经理 Demo', detail: '杭州城西体验店 · 经理演示' }
+      : { name: '总部运营 Demo', detail: '总部运营空间 · 角色演示' }
   const navItems = useMemo(() => roleItems[role], [role])
 
   useEffect(() => { setUtilityOpen(false); setAccountOpen(false) }, [route])
@@ -90,8 +96,8 @@ export function AppShell({ route, children }: { route: RouteId; children: ReactN
             <span className="demo-label">{dataMode === 'fallback' ? '本地工作区 · 未连接生产系统' : dataMode === 'demo' ? '演示数据 · 未连接生产系统' : '业务数据'}</span>
             <button className="icon-button" onClick={() => void refreshAll()} disabled={refreshing} aria-label="刷新数据"><RefreshCw className={refreshing?'spin':''} size={18}/></button>
             <div className="account-menu">
-              <button className="account-button" data-testid="role-menu" onClick={() => setAccountOpen(value => !value)}><CircleUserRound size={20}/><span><strong>{advisor?.name || '演示用户'}</strong><small>{roleLabel[role]} · {advisor?.store || '企业演示'}</small></span><ChevronDown size={14}/></button>
-              {accountOpen ? <div className="account-popover role-popover"><strong>{advisor?.name || '演示用户'}</strong><p>{advisor?.store || '当前演示组织'}</p><span className="demo-inline">角色演示，不代表已接入企业 RBAC</span><div className="role-options">{(['advisor','manager','hq'] as RoleSpace[]).map(value => <button data-testid={`switch-role-${value}`} key={value} className={role===value?'active':''} onClick={() => void changeRole(value)}>{roleLabel[value]}</button>)}</div></div> : null}
+              <button className="account-button" data-testid="role-menu" onClick={() => setAccountOpen(value => !value)}><CircleUserRound size={20}/><span><strong>{accountIdentity.name}</strong><small>{accountIdentity.detail}</small></span><ChevronDown size={14}/></button>
+              {accountOpen ? <div className="account-popover role-popover"><strong>{accountIdentity.name}</strong><p>{accountIdentity.detail}</p><span className="demo-inline">角色演示，不代表已接入企业 RBAC</span><div className="role-options">{(['advisor','manager','hq'] as RoleSpace[]).map(value => <button data-testid={`switch-role-${value}`} key={value} className={role===value?'active':''} onClick={() => void changeRole(value)}>{roleLabel[value]}</button>)}</div></div> : null}
             </div>
           </div>
         </header>

@@ -8,6 +8,10 @@ describe('hash router', () => {
     expect(route.params.get('opportunity')).toBe('opp-chen-l80')
   })
 
+  it('routes headquarters policies into the dedicated policy page', () => {
+    expect(parseRoute('#/policies').id).toBe('policies')
+  })
+
   it('falls back to today for unknown routes', () => {
     expect(parseRoute('#/unknown').id).toBe('today')
   })

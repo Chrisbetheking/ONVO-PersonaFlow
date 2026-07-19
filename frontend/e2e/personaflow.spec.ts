@@ -84,7 +84,7 @@ test('顾问从机会到审核、跟进、试驾和视频预览的完整路径',
   await page.getByTestId('followup-message').fill('周日两点可以到店，希望带儿童推车一起试装。')
   await page.getByTestId('add-followup-message').click()
   await expect(page.getByTestId('conversation-timeline')).toContainText('周日两点可以到店')
-  await expect(page.locator('[data-testid^="memory-local-"] , [data-testid^="memory-memory-"]').last()).toContainText('周日两点可以到店')
+  await expect(page.locator('[data-testid^="memory-"]').last()).toContainText('周日两点可以到店')
 
   await page.getByTestId('open-booking').click()
   await expect(page.getByTestId('booking-dialog')).toBeVisible()
@@ -281,9 +281,28 @@ test('内容编辑使核验失效，重新核验后才能提交', async ({ brows
   const page = await context.newPage()
   await openFirstOpportunity(page)
   await generateContent(page)
+
+  const evidenceCard = page.locator('.trust-item').filter({ hasText: '官方' }).first()
+  await expect(evidenceCard).toContainText('已核验')
+
+  const title = page.getByTestId('content-title')
+  await title.fill(`${await title.inputValue()} · 家庭场景版`)
+  await expect(page.getByTestId('content-revalidation-warning')).toBeVisible()
+  await expect(evidenceCard).toContainText('待重新核验')
+  await expect(evidenceCard).not.toContainText('已核验')
+  await expect(page.getByTestId('submit-review')).toBeDisabled()
+  await page.getByTestId('revalidate-content').click()
+  await expect(evidenceCard).toContainText('已核验')
+
+  const cta = page.getByTestId('content-cta')
+  await cta.fill(`${await cta.inputValue()}，也可以先让顾问确认物品清单。`)
+  await expect(page.getByTestId('submit-review')).toBeDisabled()
+  await expect(evidenceCard).toContainText('待重新核验')
+  await page.getByTestId('revalidate-content').click()
+  await expect(page.getByTestId('submit-review')).toBeEnabled()
+
   const body = page.getByTestId('content-body')
   await body.fill(`${await body.inputValue()}\n\n补充客户实际家庭使用场景。`)
-  await expect(page.getByTestId('content-revalidation-warning')).toBeVisible()
   await expect(page.getByTestId('submit-review')).toBeDisabled()
   await page.getByTestId('revalidate-content').click()
   await expect(page.getByTestId('submit-review')).toBeEnabled()
@@ -292,6 +311,7 @@ test('内容编辑使核验失效，重新核验后才能提交', async ({ brows
   await context.close()
 })
 
+
 test('客户 360 下一最佳行动和承诺台账产生真实状态变化', async ({ browser }) => {
   const context = await newWorkspaceContext(browser, 'e2e-customer-promise-001')
   const page = await context.newPage()
@@ -299,15 +319,18 @@ test('客户 360 下一最佳行动和承诺台账产生真实状态变化', asy
   const action = page.locator('[data-testid^="nba-"]').first()
   await expect(action).toBeVisible()
   await action.getByRole('button', { name: '接受' }).click()
-  await expect(action).toContainText('accepted')
+  await expect(action).toContainText('已接受')
 
   await page.goto('/#/promises')
+  await page.getByTestId('promise-promise-xu-route').click()
   await page.getByTestId('confirm-promise').click()
-  await expect(page.locator('[data-testid^="promise-"]').first()).toContainText('待执行')
+  await expect(page.getByTestId('promise-promise-xu-route')).toContainText('待执行')
   await page.getByTestId('simulate-promise-overdue').click()
-  await expect(page.locator('[data-testid^="promise-"]').first()).toContainText('已超时')
+  await expect(page.getByTestId('promise-promise-xu-route')).toContainText('已超时')
   await page.getByTestId('complete-promise').click()
-  await expect(page.locator('[data-testid^="promise-"]').first()).toContainText('已完成')
+  await page.getByTestId('promise-evidence').fill('已发送路线，客户确认收到。')
+  await page.getByTestId('confirm-promise-action').click()
+  await expect(page.getByTestId('promise-promise-xu-route')).toContainText('已完成')
   await context.close()
 })
 
@@ -378,6 +401,8 @@ test('主要企业操作按钮产生状态变化或保持明确禁用', async ({
 
   await page.goto('/#/customer-risks')
   await page.getByTestId('risk-assign-manager').click()
+  await page.getByTestId('risk-action-dialog').locator('textarea').fill('该客户需要经理协调活动与承诺口径。')
+  await page.getByTestId('confirm-risk-action').click()
   await expect(page.getByText('manager_assigned').first()).toBeVisible()
 
   await page.goto('/#/governance')

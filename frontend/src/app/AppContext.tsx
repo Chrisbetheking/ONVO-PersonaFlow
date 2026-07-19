@@ -265,6 +265,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         knowledge_version: variant.knowledge_version,
         verification_version: variant.verification_version,
         verified_at: variant.verified_at,
+        verification_token: variant.verification_token,
         version_history: variant.version_history,
       })
     }
@@ -275,6 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!generation) throw new Error('当前没有可提交的内容任务')
     if (variant.verification_status !== 'verified') throw new Error('内容已发生变化，请重新核验后再提交审核')
     const advisor = boot.advisors.find(item => item.id === variant.advisor_id)
+    if (!usingFallback) await saveVariant(variant)
     const result = usingFallback
       ? createLocalReview(generation, variant)
       : await api.submitReview({
@@ -300,6 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         knowledge_version: variant.knowledge_version,
         verification_version: variant.verification_version,
         verified_at: variant.verified_at,
+        verification_token: variant.verification_token,
         version_history: variant.version_history,
         store: advisor?.store,
       })
@@ -450,7 +453,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!generation) throw new Error('当前没有可重新核验的内容')
     const response = usingFallback
       ? {
-          variant: { ...variant, verification_status: 'verified', compliance_status: 'verified', verification_version: variant.verification_version + 1, verified_at: new Date().toISOString(), version: variant.version + 1, version_history: [...variant.version_history, { type: 'local_revalidated', at: new Date().toISOString() }] },
+          variant: { ...variant, verification_status: 'verified', compliance_status: 'verified', verification_version: variant.verification_version + 1, verified_at: new Date().toISOString(), version: variant.version + 1, verification_token: `local-${variant.id}-${variant.verification_version + 1}`, version_history: [...variant.version_history, { type: 'local_revalidated', at: new Date().toISOString() }] },
           evidence: generation.evidence,
           compliance: generation.compliance,
           verification: { status: 'verified', at: new Date().toISOString(), knowledge_version: variant.knowledge_version, method: '本地规则演示' },
@@ -475,7 +478,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const existing = workspace.reviews.find(item => item.id === reviewId)
     if (!existing) throw new Error('未找到审核任务')
     const updated = usingFallback
-      ? { ...existing, reviewed_body: changes?.body ?? existing.reviewed_body, reviewed_call_to_action: changes?.call_to_action ?? existing.reviewed_call_to_action, risk_annotations: changes?.risk_annotations ?? existing.risk_annotations, verification_status: 'verified', compliance_status: 'verified', evidence_status: '已重新核验 · 本地演示', verification_version: existing.verification_version + 1, verified_at: new Date().toISOString(), version_history: [...existing.version_history, { type: 'manager_revalidated', at: new Date().toISOString() }] }
+      ? { ...existing, reviewed_body: changes?.body ?? existing.reviewed_body, reviewed_call_to_action: changes?.call_to_action ?? existing.reviewed_call_to_action, risk_annotations: changes?.risk_annotations ?? existing.risk_annotations, verification_status: 'verified', compliance_status: 'verified', evidence_status: '已重新核验 · 本地演示', verification_version: existing.verification_version + 1, verified_at: new Date().toISOString(), verification_token: `local-review-${existing.id}-${existing.verification_version + 1}`, version_history: [...existing.version_history, { type: 'manager_revalidated', at: new Date().toISOString() }] }
       : await api.revalidateReview(reviewId, changes || {})
     setWorkspace(current => ({ ...current, reviews: current.reviews.map(item => item.id === reviewId ? updated : item) }))
     showToast('经理修改后的内容已重新核验')

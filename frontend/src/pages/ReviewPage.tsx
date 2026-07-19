@@ -91,14 +91,14 @@ export function ReviewPage({ params }: { params: URLSearchParams }) {
               <section className="review-content-editor">
                 <label className="field-label">完整正文<textarea data-testid="review-body" value={body} onChange={event => { setBody(event.target.value); setEdited(true) }} /></label>
                 <label className="field-label">行动引导<input data-testid="review-cta" value={callToAction} onChange={event => { setCallToAction(event.target.value); setEdited(true) }} /></label>
-                <div className="annotated-preview review-preview">
-                  <div className="preview-heading"><strong>逐句定位</strong><span>点击高亮陈述查看依据或风险</span></div>
+                <div className={selected.verification_status === 'verified' && !edited ? "annotated-preview review-preview" : "annotated-preview review-preview stale"}>
+                  <div className="preview-heading"><strong>逐句定位</strong><span>{selected.verification_status === 'verified' && !edited ? '点击高亮陈述查看依据或风险' : '以下为上次核验结果，经理修改后需要重新核验'}</span></div>
                   <div className="annotation-shortcuts">{selected.claims.map(claim => <button data-testid="review-mark-claim" key={claim.id} onClick={() => setActiveEvidenceId(claim.evidence_id)}>事实：{claim.field}</button>)}{riskAnnotations.map(risk => <button data-testid="review-mark-risk" key={risk.id} onClick={() => setActiveRiskId(risk.id)}>风险：{risk.rule}</button>)}</div>
                   <p>{segments.map((segment, index) => segment.type === 'plain' ? <span key={index}>{segment.text}</span> : <button data-testid={`review-mark-${segment.type}`} key={index} className={`inline-mark inline-${segment.type}`} onClick={() => segment.type === 'claim' ? setActiveEvidenceId(segment.refId || '') : setActiveRiskId(segment.refId || '')}>{segment.text}</button>)}</p>
                 </div>
               </section>
               <aside className="review-trust-panel">
-                <section><div className="panel-title"><strong>事实依据</strong><span>{selected.evidence.length} 条</span></div><EvidencePanel evidence={selected.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} /></section>
+                <section><div className="panel-title"><strong>事实依据</strong><span>{selected.evidence.length} 条</span></div><EvidencePanel evidence={selected.evidence} activeId={activeEvidenceId} onSelect={setActiveEvidenceId} verificationStatus={selected.verification_status === 'verified' && !edited ? 'verified' : 'needs_revalidation'} /></section>
                 <section><div className="panel-title"><strong>风险与建议</strong><span>{riskAnnotations.length} 项</span></div><RiskPanel risks={riskAnnotations} activeId={activeRiskId} onSelect={setActiveRiskId} onApplySuggestion={applyRiskSuggestion} /></section>
               </aside>
             </div>

@@ -5,7 +5,7 @@
 - 前端：npm，唯一 lock 文件为 `frontend/package-lock.json`。
 - Node.js：22.x。
 - Python：3.12。
-- 前端版本：0.4.0。
+- 前端版本：0.4.1。
 
 ## 2. 本地覆盖后验证
 
@@ -111,3 +111,13 @@ frontend/test-results
 3. 不只回滚前端或后端；
 4. 若生产 Adapter 异常，先将 `INTEGRATION_MODE=demo` 或关闭对应连接器；
 5. 检查知识版本和审计记录后再恢复。
+
+## 6. v0.4.1 服务端核验签名
+
+Render 环境建议新增：
+
+```env
+VERIFICATION_SIGNING_KEY=请使用随机生成的长密钥
+```
+
+该值只放在后端环境变量中，不得提交到 GitHub 或 Vercel。修改后重新部署 Render。

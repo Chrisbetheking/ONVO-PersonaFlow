@@ -1,13 +1,13 @@
 export type RouteId =
   | 'today' | 'studio' | 'followup' | 'review' | 'campaigns' | 'advisors' | 'settings' | 'about'
   | 'customers' | 'promises' | 'manager-radar' | 'customer-risks' | 'quality'
-  | 'hotspots' | 'knowledge' | 'best-practices' | 'experiments' | 'governance'
+  | 'hotspots' | 'knowledge' | 'policies' | 'best-practices' | 'experiments' | 'governance'
 
 export type RouteState = { id: RouteId; params: URLSearchParams }
 
 const validRoutes = new Set<RouteId>([
   'today','studio','followup','review','campaigns','advisors','settings','about','customers','promises',
-  'manager-radar','customer-risks','quality','hotspots','knowledge','best-practices','experiments','governance',
+  'manager-radar','customer-risks','quality','hotspots','knowledge','policies','best-practices','experiments','governance',
 ])
 
 export function parseRoute(hash = window.location.hash): RouteState {
@@ -36,6 +36,7 @@ export const routeTitles: Record<RouteId, { title: string; subtitle: string }> =
   campaigns: { title: '活动执行', subtitle: '批量任务、失败重试、抽样审核和活动状态。' },
   hotspots: { title: '热点与洞察', subtitle: '把内部信号与模拟公开趋势转成内容、知识或触达任务。' },
   knowledge: { title: '知识中心', subtitle: '管理企业知识版本，并查看变化对内容、客户和活动的影响。' },
+  policies: { title: '政策与权益', subtitle: '按有效期、区域和知识新鲜度管理价格、权益与销售口径。' },
   'best-practices': { title: '优秀案例', subtitle: '经理确认后再沉淀可复用的沟通方法。' },
   experiments: { title: '效果验证', subtitle: '展示验证方案、样本边界和尚未形成真实结论的状态。' },
   governance: { title: '系统治理', subtitle: '管理 Demo Adapter、审计记录、演示场景和生产接入边界。' },

@@ -34,12 +34,42 @@ def generation_payload() -> dict[str, Any]:
         "use_llm": False,
     }
 
+def save_verified_draft(headers: dict[str, str], generated: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "task_id": generated["task_id"], "variant_id": variant["id"], "platform": variant["platform"],
+        "title": variant["title"], "body": variant["body"], "call_to_action": variant["call_to_action"],
+        "claims": variant["claims"], "risk_annotations": variant["risk_annotations"], "evidence": generated["evidence"],
+        "status": "draft", "verification_status": variant["verification_status"],
+        "compliance_status": variant["compliance_status"], "knowledge_version": variant["knowledge_version"],
+        "verification_version": variant["verification_version"], "verified_at": variant["verified_at"],
+        "verification_token": variant["verification_token"], "version_history": variant["version_history"],
+    }
+    response = client.post("/api/drafts/save", headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    return payload
+
+
+def submit_saved_variant(headers: dict[str, str], generated: dict[str, Any], variant: dict[str, Any], *, reason: str = "审核记录") -> httpx.Response:
+    save_verified_draft(headers, generated, variant)
+    return client.post("/api/drafts/submit-review", headers=headers, json={
+        "task_id": generated["task_id"], "variant_id": variant["id"], "platform": variant["platform"],
+        "title": variant["title"], "body": variant["body"], "call_to_action": variant["call_to_action"],
+        "claims": variant["claims"], "risk_annotations": variant["risk_annotations"], "evidence": generated["evidence"],
+        "campaign_name": generated["campaign_name"], "advisor_id": variant["advisor_id"],
+        "advisor_name": variant["advisor_name"], "vehicle_id": generated["vehicle"]["id"],
+        "risk_level": "medium", "reason": reason, "evidence_status": "已绑定",
+        "verification_status": variant["verification_status"], "compliance_status": variant["compliance_status"],
+        "knowledge_version": variant["knowledge_version"], "verification_version": variant["verification_version"],
+        "verified_at": variant["verified_at"], "verification_token": variant["verification_token"],
+        "version_history": variant["version_history"],
+    })
+
 
 def test_health_and_anonymous_workspace_header() -> None:
     health = client.get("/api/health")
     workspace = client.get("/api/workspace")
     assert health.status_code == 200
-    assert health.json()["version"] == "0.4.0"
+    assert health.json()["version"] == "0.4.1"
     generated = workspace.headers.get("X-Workspace-Id")
     assert generated and generated.startswith("anon-")
     followup = client.get("/api/workspace", headers={"X-Workspace-Id": generated})
@@ -60,24 +90,7 @@ def test_two_workspaces_are_isolated_and_reset_is_scoped() -> None:
     assert event.status_code == 200
     generated_b = client.post("/api/content/generate", headers=B, json=generation_payload()).json()
     variant_b = generated_b["variants"][0]
-    review_b = client.post("/api/drafts/submit-review", headers=B, json={
-        "task_id": generated_b["task_id"],
-        "variant_id": variant_b["id"],
-        "platform": variant_b["platform"],
-        "title": variant_b["title"],
-        "body": variant_b["body"],
-        "call_to_action": variant_b["call_to_action"],
-        "claims": variant_b["claims"],
-        "risk_annotations": variant_b["risk_annotations"],
-        "evidence": generated_b["evidence"],
-        "campaign_name": generated_b["campaign_name"],
-        "advisor_id": variant_b["advisor_id"],
-        "advisor_name": variant_b["advisor_name"],
-        "vehicle_id": generated_b["vehicle"]["id"],
-        "risk_level": "medium",
-        "reason": "B 工作区审核记录",
-        "evidence_status": "已绑定",
-    })
+    review_b = submit_saved_variant(B, generated_b, variant_b, reason="B 工作区审核记录")
     assert review_b.status_code == 200
 
     workspace_a = client.get("/api/workspace", headers=A).json()
@@ -96,17 +109,18 @@ def test_two_workspaces_are_isolated_and_reset_is_scoped() -> None:
 
 def test_generation_submit_review_preserves_full_content_and_requires_revalidation_after_manager_edit() -> None:
     generated = client.post("/api/content/generate", headers=A, json=generation_payload()).json()
-    variant = generated["variants"][1]
-    long_body = variant["body"] + "\n\n这是审核时必须保留的完整尾部内容。"
-    submit = client.post("/api/drafts/submit-review", headers=A, json={
-        "task_id": generated["task_id"], "variant_id": variant["id"], "platform": variant["platform"],
-        "title": variant["title"], "body": long_body, "call_to_action": variant["call_to_action"],
-        "claims": variant["claims"], "risk_annotations": variant["risk_annotations"], "evidence": generated["evidence"],
-        "campaign_name": generated["campaign_name"], "advisor_id": variant["advisor_id"], "advisor_name": variant["advisor_name"],
-        "vehicle_id": generated["vehicle"]["id"], "risk_level": "medium", "reason": "逐句审核测试", "evidence_status": "已绑定",
-        "verification_status": "verified", "compliance_status": "verified", "knowledge_version": "demo-2026.07",
+    original = generated["variants"][1]
+    long_body = original["body"] + "\n\n这是审核时必须保留的完整尾部内容。"
+    checked_response = client.post("/api/content/revalidate", headers=A, json={
+        "task_id": generated["task_id"], "variant_id": original["id"], "advisor_id": original["advisor_id"],
+        "vehicle_id": generated["vehicle"]["id"], "platform": original["platform"], "title": original["title"],
+        "body": long_body, "call_to_action": original["call_to_action"], "version": original["verification_version"],
     })
-    assert submit.status_code == 200
+    assert checked_response.status_code == 200
+    variant = checked_response.json()["variant"]
+    generated["evidence"] = checked_response.json()["evidence"]
+    submit = submit_saved_variant(A, generated, variant, reason="逐句审核测试")
+    assert submit.status_code == 200, submit.text
     review = submit.json()
     assert review["body"] == long_body
     assert review["claims"] == variant["claims"]
@@ -378,3 +392,90 @@ def test_enterprise_objects_include_workspace_and_audit_metadata() -> None:
     assert required.issubset(payload["hotspots"][0]["evidence"][0])
     assert required.issubset(payload["knowledge_items"][0]["versions"][0])
     assert required.issubset(payload["customer_profiles"][0]["next_best_actions"][0])
+
+
+def test_server_rejects_forged_verification_and_unverified_send() -> None:
+    generated = client.post("/api/content/generate", headers=A, json=generation_payload()).json()
+    variant = generated["variants"][0]
+    forged = {**variant, "verification_token": "forged-token"}
+    bad_save = client.post("/api/drafts/save", headers=A, json={
+        "task_id": generated["task_id"], "variant_id": forged["id"], "platform": forged["platform"],
+        "title": forged["title"], "body": forged["body"], "call_to_action": forged["call_to_action"],
+        "claims": forged["claims"], "risk_annotations": forged["risk_annotations"], "evidence": generated["evidence"],
+        "verification_status": "verified", "compliance_status": "verified", "knowledge_version": forged["knowledge_version"],
+        "verification_version": forged["verification_version"], "verified_at": forged["verified_at"],
+        "verification_token": forged["verification_token"], "version_history": forged["version_history"],
+    })
+    assert bad_save.status_code == 422
+    sent = client.post("/api/followups/customer-chen/events", headers=A, json={
+        "type": "advisor_sent", "actor": "周辰", "title": "绕过核验发送", "content": variant["body"],
+        "task_id": generated["task_id"], "variant_id": variant["id"], "verification_version": variant["verification_version"],
+        "verification_token": variant["verification_token"],
+    })
+    assert sent.status_code == 422
+
+
+def test_followup_message_conversion_and_sync_retry_are_persistent() -> None:
+    followup = client.post("/api/followups/customer-chen/events", headers=A, json={
+        "type": "customer_message", "actor": "陈女士", "title": "客户承诺线索",
+        "content": "请周日提醒我带儿童推车。", "status": "received",
+        "source_label": "授权沟通 Demo", "sync_status": "已同步",
+    }).json()
+    event_id = followup["events"][-1]["id"]
+    converted = client.post(f"/api/followups/customer-chen/events/{event_id}/convert", headers=A, json={"action": "promise", "note": "周日提醒"})
+    assert converted.status_code == 200, converted.text
+    assert converted.json()["created"]["status"] == "pending_confirmation"
+    enterprise = client.get("/api/enterprise", headers=A).json()
+    assert any(item["original_message"] == "请周日提醒我带儿童推车。" for item in enterprise["promises"])
+
+    sync = client.post("/api/integrations/messaging/sync", headers=A, json={}).json()
+    event_id = sync["id"]
+    retry = client.post(f"/api/sync-events/{event_id}/retry", headers=A, json={"reason": "恢复网络后重试"})
+    assert retry.status_code == 200
+    assert retry.json()["retry_count"] == 1
+
+
+def test_promise_uses_customer_actual_advisor_and_writes_audit() -> None:
+    client.post("/api/demo/reset", headers=A)
+    created = client.post("/api/promises", headers=A, json={
+        "customer_id": "customer-xu",
+        "advisor_id": "advisor-hz-02",
+        "commitment": "明天确认置换资料",
+        "due_at": "2026-07-21T10:00",
+        "original_message": "我明天回复您",
+    })
+    assert created.status_code == 200, created.text
+    promise = created.json()
+    customer = next(item for item in client.get("/api/customers", headers=A).json()["items"] if item["id"] == "customer-xu")
+    assert promise["advisor_id"] == customer["advisor_id"]
+    enterprise = client.get("/api/enterprise", headers=A).json()
+    assert any(event["object_type"] == "promise" and event["object_id"] == promise["id"] for event in enterprise["audit_log"])
+
+
+def test_title_and_cta_changes_require_fresh_signed_verification() -> None:
+    client.post("/api/demo/reset", headers=A)
+    generated = client.post("/api/content/generate", headers=A, json=generation_payload()).json()
+    variant = generated["variants"][0]
+    save_verified_draft(A, generated, variant)
+    for changed_field in ("title", "call_to_action"):
+        changed = dict(variant)
+        changed[changed_field] = changed[changed_field] + " 已编辑"
+        response = client.post("/api/drafts/save", headers=A, json={
+            "task_id": generated["task_id"],
+            "variant_id": changed["id"],
+            "platform": changed["platform"],
+            "title": changed["title"],
+            "body": changed["body"],
+            "call_to_action": changed["call_to_action"],
+            "claims": changed["claims"],
+            "risk_annotations": changed["risk_annotations"],
+            "evidence": generated["evidence"],
+            "verification_status": "verified",
+            "compliance_status": "verified",
+            "knowledge_version": changed["knowledge_version"],
+            "verification_version": changed["verification_version"],
+            "verified_at": changed["verified_at"],
+            "verification_token": changed["verification_token"],
+            "version_history": changed["version_history"],
+        })
+        assert response.status_code == 422
