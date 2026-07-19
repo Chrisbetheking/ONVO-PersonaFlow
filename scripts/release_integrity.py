@@ -133,9 +133,29 @@ def run_checks(root: Path, manifest: Path | None, archive: Path | None) -> list[
     passed.append("required documents and README links exist")
 
     ci = read(root, ".github/workflows/ci.yml")
-    for command in [
+
+    def require_ci_command(label: str, *accepted_commands: str) -> None:
+        require(
+            any(command in ci for command in accepted_commands),
+            f"CI missing: {label}",
+        )
+
+    # Accept both `python` and `python3`, and either repository-root paths or
+    # commands executed from `working-directory: backend`. These forms are
+    # operationally equivalent and should not make release validation fail.
+    require_ci_command(
+        "backend compileall",
         "python -m compileall -q app",
+        "python3 -m compileall -q app",
+        "python -m compileall -q backend/app",
+        "python3 -m compileall -q backend/app",
+    )
+    require_ci_command(
+        "backend pytest",
         "python -m pytest -q",
+        "python3 -m pytest -q",
+    )
+    for command in [
         "npm ci",
         "npm run typecheck",
         "npm test",
