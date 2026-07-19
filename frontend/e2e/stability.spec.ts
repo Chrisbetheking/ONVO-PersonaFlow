@@ -253,9 +253,17 @@ test("客户沟通视觉回归基线", async ({ browser }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/#/followup?customer=customer-chen");
   await expect(page.getByTestId("conversation-timeline")).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
   await expect(page).toHaveScreenshot("conversation-workbench-1440.png", {
     animations: "disabled",
+    caret: "hide",
     fullPage: false,
+    // GitHub-hosted Chromium and local Linux render CJK glyph edges slightly
+    // differently. Functional width/writing-mode assertions above still catch
+    // real layout regressions; this allowance only absorbs rasterization noise.
+    maxDiffPixelRatio: 0.035,
   });
   await context.close();
 });
